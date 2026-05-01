@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lodet — anbudsverktyg</title>
+  <meta name="description" content="Lodet hjälper svenska bygg- och anläggningsentreprenörer att lämna anbud snabbare och säkrare." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a href="/" class="brand">
+        <span class="brand-mark">⊥</span>
+        <span class="brand-name">LODET</span>
+      </a>
+      <nav class="topnav">
+        <a href="https://github.com/dennisdemirtok/lodetanbud" target="_blank" rel="noopener">GitHub</a>
+        <span class="version">v{{ version }}</span>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <h1>Anbud i lod.<br/><span class="muted">Inget mer, inget mindre.</span></h1>
+        <p class="lede">Ladda upp din mängdförteckning. Lodet parsar AMA-strukturen, föreslår priser baserat på historik och levererar en redigerbar Excel-mall för granskning.</p>
+      </div>
+    </section>
+
+    <section class="upload-section">
+      <div class="container">
+        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Ladda upp CSV-fil">
+          <input type="file" id="fileInput" accept=".csv" hidden />
+          <div class="dropzone-content">
+            <div class="dropzone-icon">↑</div>
+            <p class="dropzone-headline">Dra och släpp en mängdförteckning (.csv)</p>
+            <p class="dropzone-sub">eller <button type="button" class="link-btn" id="browseBtn">välj fil från datorn</button></p>
+            <p class="dropzone-hint">Stöd för semikolon-separerad CSV från BidCon, Beast och liknande system. Max 10 MB.</p>
+          </div>
+        </div>
+        <div class="actions-row">
+          <button type="button" class="btn btn-ghost" id="exampleBtn">Prova med Westcon-demo</button>
+        </div>
+        <div id="status" class="status" hidden></div>
+      </div>
+    </section>
+
+    <section id="results" class="results" hidden>
+      <div class="container">
+        <div class="result-header">
+          <div>
+            <p class="eyebrow">Parsat dokument</p>
+            <h2 id="resultProject">—</h2>
+            <p id="resultMeta" class="muted"></p>
+          </div>
+          <div class="result-actions">
+            <button type="button" class="btn btn-primary" id="downloadBtn">Hämta Excel-mall</button>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat">
+            <span class="stat-label">Totalbelopp</span>
+            <span class="stat-value" id="statTotal">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Antal rader</span>
+            <span class="stat-value" id="statLines">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Prissatta</span>
+            <span class="stat-value" id="statPriced">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Klumpsumma</span>
+            <span class="stat-value" id="statLump">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">AMA-koder</span>
+            <span class="stat-value" id="statAma">—</span>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <h3>Rader per AMA-grupp</h3>
+            <span class="muted small" id="tableInfo"></span>
+          </div>
+          <div class="table-scroll">
+            <table id="linesTable">
+              <thead>
+                <tr>
+                  <th>AMA-kod</th>
+                  <th class="col-desc">Beskrivning</th>
+                  <th class="col-num">Enhet</th>
+                  <th class="col-num">Antal</th>
+                  <th class="col-num">À-pris</th>
+                  <th class="col-num">Belopp</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="info">
+      <div class="container info-grid">
+        <div class="info-card">
+          <h3>Strukturparsing</h3>
+          <p>Lodet identifierar AMA Anläggning-koder, parent-child-grupper, klumpsummor och svenska talformat — automatiskt.</p>
+        </div>
+        <div class="info-card">
+          <h3>Historisk matchning</h3>
+          <p>Varje rad jämförs mot tidigare lämnade och vunna anbud. Indexjustering enligt E84/KPI per kategori.</p>
+        </div>
+        <div class="info-card">
+          <h3>Granska och justera</h3>
+          <p>Excel-mallen är redigerbar. Justera à-pris i kolumn I så uppdateras totalsumman automatiskt.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p class="footer-tag">"I lod. Inget mer, inget mindre."</p>
+      <p class="muted small">© 2026 Lodet · v{{ version }}</p>
+    </div>
+  </footer>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
