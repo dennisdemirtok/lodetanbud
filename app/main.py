@@ -17,6 +17,10 @@ from fastapi.templating import Jinja2Templates
 from app import __version__
 from app import afb_templates as afb
 from app import ama_catalog
+from app import agent as lodet_agent
+from app import file_classifier
+from app import pdf_extractor
+from app import ue_emailer
 from app.excel_builder import build_workbook
 from app.parser import parse_csv_bytes
 
@@ -240,6 +244,99 @@ async def api_afb_render(
         raise HTTPException(status_code=404, detail=f"Okänd mall: {template_id}")
 
     return JSONResponse({"template_id": template_id, "text": text})
+
+
+# --- Agent / paketanalys --------------------------------------------------
+
+@app.post("/api/package/analyze")
+async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONResponse:
+    """
+    Tar emot ett helt anbudspaket (många filer på en gång), klassificerar
+    varje fil och returnerar agentens analys + rekommendationer.
+
+    Om en CSV-fil hittas parsas den som mängdförteckning.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="Inga filer mottagna")
+
+    file_infos: list[lodet_agent.FileInfo] = []
+    parsed_mf: dict | None = None
+
+    for f in files:
+        if not f.filename:
+            continue
+        data = await f.read()
+        size_kb = max(1, len(data) // 1024)
+
+        content_text = ""
+        if f.filename.lower().endswith(".pdf"):
+            content_text = pdf_extractor.extract_first_page_text(data)
+
+        kind = file_classifier.classify(f.filename, data, content_text)
+
+        # Försök parsa mängdförteckning om CSV
+        if kind.type == "mf" and f.filename.lower().endswith(".csv") and parsed_mf is None:
+            try:
+                doc = parse_csv_bytes(data)
+                parsed_mf = doc.to_dict()
+            except Exception:
+                pass
+
+        # Plocka ut metadata om PDF
+        meta_extra: dict = {}
+        if content_text:
+            meta_extra = pdf_extractor.sniff_metadata_from_text(content_text)
+        if f.filename.lower().endswith(".pdf"):
+            pdf_meta = pdf_extractor.extract_metadata(data)
+            meta_extra.update({"page_count": pdf_meta.get("page_count")})
+
+        file_infos.append(
+            lodet_agent.FileInfo(
+                filename=f.filename,
+                type=kind.type,
+                label=kind.label,
+                confidence=kind.confidence,
+                size_kb=size_kb,
+                project_id=kind.project_id or file_classifier.extract_project_id(f.filename),
+                discipline=kind.discipline,
+                metadata=meta_extra or None,
+            )
+        )
+
+    analysis = lodet_agent.analyze_package(file_infos, parsed_mf)
+    return JSONResponse({
+        "analysis": analysis,
+        "parsed_mf": parsed_mf,
+    })
+
+
+@app.post("/api/ue/email")
+async def api_ue_email(
+    areas: str = Form(...),
+    project_name: str = Form("VÄG 875, GC SUNDBORN"),
+    document_number: str = Form("1E12MF10"),
+    company_name: str = Form("Westcon Entreprenad AB"),
+    contact_name: str = Form(""),
+    contact_email: str = Form(""),
+    contact_phone: str = Form(""),
+    bid_due: str = Form(""),
+    relevant_codes: str = Form(""),
+) -> JSONResponse:
+    area_list = [a.strip() for a in areas.split(",") if a.strip()]
+    code_list = [c.strip() for c in relevant_codes.split(",") if c.strip()]
+
+    drafts = ue_emailer.generate_for_areas(
+        areas=area_list,
+        project_name=project_name,
+        document_number=document_number,
+        company_name=company_name,
+        contact_name=contact_name,
+        contact_email=contact_email,
+        contact_phone=contact_phone,
+        bid_due=bid_due or None,
+        relevant_codes=code_list,
+    )
+    return JSONResponse({"drafts": drafts, "count": len(drafts)})
 
 
 # --- Dashboard / stats ----------------------------------------------------

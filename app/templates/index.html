@@ -24,9 +24,14 @@
         </div>
       </div>
 
-      <button class="sidebar-cta" data-route="#/upload">+ Nytt anbud</button>
+      <button class="sidebar-cta" data-route="#/start">+ Nytt anbud</button>
 
       <nav class="sidebar-nav">
+
+        <a class="nav-item" data-route="#/start">
+          <span class="nav-icon">✦</span>
+          <span class="nav-label">Start</span>
+        </a>
 
         <a class="nav-item" data-route="#/dashboard">
           <span class="nav-icon">▦</span>
@@ -126,6 +131,117 @@
       </header>
 
       <main class="content" id="content">
+
+        <!-- =================== START / AGENT =================== -->
+        <section class="view" data-view="start" hidden>
+          <div class="page-head">
+            <p class="eyebrow">Lodet-agenten</p>
+            <h1>God morgon, vad ska vi göra?</h1>
+            <p class="lede">Släpp hela förfrågningspaketet — mängdförteckning, AF-dokument, teknisk beskrivning och ritningar — så går agenten igenom det och föreslår nästa steg.</p>
+          </div>
+
+          <div id="multiDropzone" class="dropzone dropzone-multi" tabindex="0" role="button" aria-label="Ladda upp förfrågningspaket">
+            <input type="file" id="multiFileInput" accept=".pdf,.csv,.xlsx,.xlsm,.xls" multiple hidden />
+            <div class="dropzone-content">
+              <div class="dropzone-icon">↑</div>
+              <p class="dropzone-headline">Dra och släpp hela förfrågningspaketet</p>
+              <p class="dropzone-sub">PDF · CSV · Excel — flera filer samtidigt &nbsp;·&nbsp; <button type="button" class="link-btn" id="multiBrowseBtn">välj filer</button></p>
+              <p class="dropzone-hint">Mängdförteckning, AF-dokument, teknisk beskrivning, ritningar, kontrakt — släpp allt på en gång.</p>
+            </div>
+          </div>
+
+          <div class="actions-row">
+            <button type="button" class="btn btn-ghost" id="demoPackageBtn">Prova med Westcon-paket (1 fil)</button>
+          </div>
+
+          <div id="agentStatus" class="status" hidden></div>
+
+          <div id="filesPanel" class="panel" hidden>
+            <div class="panel-head">
+              <h2>Filer i paketet</h2>
+              <span class="muted small" id="filesPanelCount"></span>
+            </div>
+            <div id="fileChips" class="file-chips"></div>
+          </div>
+
+          <div id="agentPanel" class="agent-panel" hidden>
+            <div class="agent-head">
+              <span class="agent-avatar">⊥</span>
+              <div>
+                <p class="agent-name">Lodet-agenten</p>
+                <p class="agent-role muted small">analyserar paketet · uppdaterad just nu</p>
+              </div>
+            </div>
+            <div id="agentNarrative" class="agent-narrative"></div>
+            <div class="agent-recs-head">Rekommendationer</div>
+            <div id="agentRecs" class="agent-recs"></div>
+          </div>
+
+          <div class="quick-actions">
+            <p class="quick-actions-title">Vad vill du göra?</p>
+            <div class="quick-action-grid">
+              <button class="quick-action" data-route="#/upload">
+                <span class="qa-icon">⊞</span>
+                <span class="qa-title">Endast MF (CSV)</span>
+                <span class="qa-desc">Hoppa direkt till uppladdning av mängdförteckning</span>
+              </button>
+              <button class="quick-action" data-route="#/agent/ue">
+                <span class="qa-icon">✉</span>
+                <span class="qa-title">Skapa UE-mejl</span>
+                <span class="qa-desc">Be om offerter från underentreprenörer</span>
+              </button>
+              <button class="quick-action" data-route="#/docs/afb">
+                <span class="qa-icon">⊡</span>
+                <span class="qa-title">AFB-mallar</span>
+                <span class="qa-desc">Anbudssumma, UE-lista, sekretess, missiv</span>
+              </button>
+              <button class="quick-action" data-route="#/ama/anlaggning">
+                <span class="qa-icon">⊟</span>
+                <span class="qa-title">AMA-bibliotek</span>
+                <span class="qa-desc">Bläddra koder och indexbasis</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- =================== UE-MEJL =================== -->
+        <section class="view" data-view="agent-ue" hidden>
+          <div class="page-head">
+            <p class="eyebrow">Agent / UE-mejl</p>
+            <h1>Begär offert från underentreprenörer</h1>
+            <p class="lede">Lodet föreslår UE-områden baserat på AMA-koderna i mängdförteckningen och genererar färdiga mejlutkast.</p>
+          </div>
+
+          <div class="two-col">
+            <div class="panel">
+              <div class="panel-head"><h2>Värden</h2></div>
+              <form id="ueForm" class="form">
+                <label>Projekt<input type="text" name="project_name" value="VÄG 875, GC SUNDBORN" /></label>
+                <label>Dokumentnr<input type="text" name="document_number" value="1E12MF10" /></label>
+                <label>Ditt företag<input type="text" name="company_name" value="Westcon Entreprenad AB" /></label>
+                <label>Kontaktperson<input type="text" name="contact_name" value="Lars Olsson" /></label>
+                <label>E-post<input type="email" name="contact_email" value="lars@westcon.se" /></label>
+                <label>Telefon<input type="tel" name="contact_phone" value="070-000 00 00" /></label>
+                <label>Deadline<input type="date" name="bid_due" /></label>
+
+                <div class="ue-areas-block">
+                  <span class="ue-areas-label">UE-områden (valda från agenten)</span>
+                  <div id="ueAreas" class="ue-area-chips"></div>
+                  <input type="text" id="ueExtraArea" placeholder="Lägg till område…" />
+                </div>
+
+                <button type="submit" class="btn btn-primary">Generera mejlutkast</button>
+              </form>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><h2>Mejlutkast</h2></div>
+              <div id="ueDraftList" class="ue-draft-list">
+                <div class="empty-state"><p>Välj områden och klicka "Generera mejlutkast" för att skapa förslag.</p></div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <!-- =================== ÖVERSIKT =================== -->
         <section class="view" data-view="dashboard" hidden>

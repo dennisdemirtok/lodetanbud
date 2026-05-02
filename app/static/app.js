@@ -10,6 +10,8 @@ const STORAGE_KEY = 'lodet:history';
 // ---------- ROUTING ------------------------------------------------------
 
 const ROUTES = {
+  '#/start':               { view: 'start',         crumb: 'Start',                   handler: renderStart },
+  '#/agent/ue':            { view: 'agent-ue',      crumb: 'Agent / UE-mejl',         handler: renderUePage },
   '#/dashboard':           { view: 'dashboard',     crumb: 'Översikt',                handler: renderDashboard },
   '#/upload':              { view: 'upload',        crumb: 'Anbud / nytt',            handler: renderUpload },
   '#/bids/active':         { view: 'bids-active',   crumb: 'Anbud / pågående',        handler: renderActiveBids },
@@ -65,7 +67,9 @@ document.addEventListener('DOMContentLoaded', () => {
   bindSidebar();
   bindUpload();
   bindTemplateForm();
-  if (!location.hash) location.hash = '#/dashboard';
+  bindStart();
+  bindUeForm();
+  if (!location.hash) location.hash = '#/start';
   navigate();
 });
 
@@ -560,6 +564,275 @@ function renderInst(title, desc) {
   document.getElementById('instEyebrow').textContent = 'Inställningar';
   document.getElementById('instTitle').textContent = title;
   document.getElementById('instDesc').textContent = desc;
+}
+
+// ---------- START / AGENT ------------------------------------------------
+
+let lastAnalysis = null;
+
+function bindStart() {
+  const dz = document.getElementById('multiDropzone');
+  const input = document.getElementById('multiFileInput');
+  const browse = document.getElementById('multiBrowseBtn');
+  const demo = document.getElementById('demoPackageBtn');
+
+  dz.addEventListener('click', (e) => { if (e.target !== browse) input.click(); });
+  dz.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+  });
+  browse.addEventListener('click', (e) => { e.stopPropagation(); input.click(); });
+
+  ['dragenter', 'dragover'].forEach((ev) =>
+    dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('dragover'); })
+  );
+  ['dragleave', 'dragend', 'drop'].forEach((ev) =>
+    dz.addEventListener(ev, () => dz.classList.remove('dragover'))
+  );
+  dz.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length) handlePackageFiles(files);
+  });
+  input.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length) handlePackageFiles(files);
+  });
+
+  demo.addEventListener('click', loadDemoPackage);
+
+  document.querySelectorAll('.quick-action[data-route]').forEach((b) => {
+    b.addEventListener('click', () => { location.hash = b.dataset.route; });
+  });
+}
+
+function renderStart() { /* state already bound */ }
+
+async function handlePackageFiles(files) {
+  const status = document.getElementById('agentStatus');
+  status.hidden = false;
+  status.className = 'status loading';
+  status.textContent = `Skickar ${files.length} fil${files.length === 1 ? '' : 'er'} till agenten …`;
+
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+
+  try {
+    const res = await fetch('/api/package/analyze', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    lastAnalysis = data.analysis;
+    renderAgentResult(data.analysis);
+    if (data.parsed_mf) saveMfToHistory(data.parsed_mf);
+    status.hidden = true;
+  } catch (e) {
+    status.className = 'status error';
+    status.textContent = `Fel: ${e.message}`;
+  }
+}
+
+async function loadDemoPackage() {
+  // Hämtar demo-CSV och kör den genom paket-endpoint som ett enskilt-fil-paket
+  const status = document.getElementById('agentStatus');
+  status.hidden = false;
+  status.className = 'status loading';
+  status.textContent = 'Hämtar Westcon-demo …';
+
+  try {
+    const csvRes = await fetch('/api/example');
+    const ex = await csvRes.json();
+    const csv = await fetch(`/static/demo_input.csv`).catch(() => null);
+    if (csv && csv.ok) {
+      const blob = await csv.blob();
+      const file = new File([blob], 'demo_input.csv', { type: 'text/csv' });
+      handlePackageFiles([file]);
+      return;
+    }
+    // Fallback: visa exempel-data direkt utan paketanalys
+    lastAnalysis = {
+      summary: { file_count: 1, type_breakdown: { mf: 1 }, has_mf: true, has_af: false, has_tb: false, has_kontrakt: false, ritning_count: 0, disciplines: [], project_ids: [], project_name: ex.summary.project, customer: null, bid_due_at: null, total_size_kb: 16 },
+      narrative: 'Endast mängdförteckning hittad. Generera Excel-mall eller starta UE-mejl.',
+      files: [{ filename: ex.filename, type: 'mf', label: 'Mängdförteckning', confidence: 1.0, size_kb: 16 }],
+      recommendations: [
+        { id: 'parsed', priority: 1, title: `MF parsad: ${ex.summary.project}`, body: `${ex.summary.line_count} rader · totalbelopp ${ex.summary.total_amount_sek ? new Intl.NumberFormat('sv-SE').format(ex.summary.total_amount_sek) + ' kr' : '—'}`, action_label: 'Hämta Excel-mall', action_route: '#/upload' },
+        { id: 'ue', priority: 2, title: 'Begär offert från underentreprenörer', body: 'Baserat på AMA-koderna föreslås mejl till spont/pålning, asfaltering, el och linjemålning.', action_label: 'Skapa UE-mejl', action_route: '#/agent/ue' },
+      ],
+      ue_suggestions: ['Spont och pålning', 'Demontering', 'Elinstallation', 'Belysningsinstallation', 'Märkning och skyltning'],
+    };
+    saveMfToHistory(ex.data);
+    renderAgentResult(lastAnalysis);
+    status.hidden = true;
+  } catch (e) {
+    status.className = 'status error';
+    status.textContent = `Fel: ${e.message}`;
+  }
+}
+
+function renderAgentResult(analysis) {
+  // File chips
+  const filesPanel = document.getElementById('filesPanel');
+  const chipsEl = document.getElementById('fileChips');
+  const countEl = document.getElementById('filesPanelCount');
+
+  countEl.textContent = `${analysis.summary.file_count} filer · ${analysis.summary.total_size_kb} kB`;
+  chipsEl.innerHTML = analysis.files.map((f) => `
+    <span class="file-chip">
+      <span class="file-chip-type" data-type="${escapeHtml(f.type)}">${escapeHtml(typeShort(f.type))}</span>
+      <span class="file-chip-name" title="${escapeHtml(f.filename)}">${escapeHtml(f.filename)}</span>
+      <span class="file-chip-status">✓</span>
+    </span>
+  `).join('');
+  filesPanel.hidden = false;
+
+  // Agent panel
+  const agentPanel = document.getElementById('agentPanel');
+  document.getElementById('agentNarrative').innerHTML = renderMarkdownLight(analysis.narrative);
+
+  const recsEl = document.getElementById('agentRecs');
+  recsEl.innerHTML = analysis.recommendations.map((r) => `
+    <div class="agent-rec" data-priority="${r.priority}">
+      <div class="agent-rec-priority">${r.priority}</div>
+      <div class="agent-rec-body">
+        <p class="agent-rec-title">${escapeHtml(r.title)}</p>
+        <p class="agent-rec-text">${escapeHtml(r.body)}</p>
+        ${r.action_route ? `<button class="agent-rec-action" data-route="${escapeHtml(r.action_route)}">${escapeHtml(r.action_label || 'Öppna')} →</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  recsEl.querySelectorAll('.agent-rec-action').forEach((btn) => {
+    btn.addEventListener('click', () => { location.hash = btn.dataset.route; });
+  });
+
+  agentPanel.hidden = false;
+  agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function typeShort(t) {
+  return ({
+    'mf': 'MF', 'af': 'AF', 'tb': 'TB', 'ritning': 'RIT',
+    'if': 'IF', 'rf': 'RF', 'kontrakt': 'KONTR', 'sekretess': 'SEKR', 'okant': '?',
+  })[t] || t.toUpperCase();
+}
+
+function renderMarkdownLight(text) {
+  // Mycket enkel markdown: **bold** och radbrytningar
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>')
+    .replace(/^/, '<p>')
+    .replace(/$/, '</p>');
+}
+
+function saveMfToHistory(parsedMf) {
+  // Använd befintlig history-funktion som tar payload med summary
+  try {
+    const meta = parsedMf.metadata || {};
+    const lines = parsedMf.lines || [];
+    const fakeSummary = {
+      project: meta.project_name,
+      document_number: meta.document_number,
+      total_amount_sek: meta.total_amount_sek,
+      line_count: lines.length,
+      ama_codes_used: [...new Set(lines.map((l) => l.ama_code).filter(Boolean))],
+    };
+    saveToHistory({
+      filename: meta.document_number ? `${meta.document_number}.csv` : 'package_mf.csv',
+      summary: fakeSummary,
+    });
+  } catch (e) { console.warn(e); }
+}
+
+// ---------- UE-MEJL-VYN -------------------------------------------------
+
+function renderUePage() {
+  const ueAreasEl = document.getElementById('ueAreas');
+  const suggestions = lastAnalysis?.ue_suggestions || [
+    'Spont och pålning', 'Asfaltering', 'Elinstallation',
+    'Belysningsinstallation', 'Märkning och skyltning', 'Linjemålning',
+  ];
+  ueAreasEl.dataset.areas = JSON.stringify(suggestions);
+  ueAreasEl.innerHTML = suggestions.map((a) => `
+    <span class="ue-area-chip selected" data-area="${escapeHtml(a)}">
+      ${escapeHtml(a)}
+      <span class="ue-area-chip-x">✕</span>
+    </span>
+  `).join('');
+
+  ueAreasEl.querySelectorAll('.ue-area-chip').forEach((chip) => {
+    chip.addEventListener('click', () => chip.classList.toggle('selected'));
+  });
+}
+
+function bindUeForm() {
+  const form = document.getElementById('ueForm');
+  const extra = document.getElementById('ueExtraArea');
+  if (!form) return;
+
+  extra.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const v = extra.value.trim();
+      if (!v) return;
+      const ueAreasEl = document.getElementById('ueAreas');
+      const chip = document.createElement('span');
+      chip.className = 'ue-area-chip selected';
+      chip.dataset.area = v;
+      chip.innerHTML = `${escapeHtml(v)} <span class="ue-area-chip-x">✕</span>`;
+      chip.addEventListener('click', () => chip.classList.toggle('selected'));
+      ueAreasEl.appendChild(chip);
+      extra.value = '';
+    }
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const selected = Array.from(document.querySelectorAll('.ue-area-chip.selected'))
+      .map((c) => c.dataset.area);
+    if (selected.length === 0) {
+      alert('Välj minst ett UE-område');
+      return;
+    }
+    const fd = new FormData(form);
+    fd.append('areas', selected.join(','));
+    try {
+      const res = await fetch('/api/ue/email', { method: 'POST', body: fd });
+      const d = await res.json();
+      renderUeDrafts(d.drafts);
+    } catch (e) {
+      console.error(e);
+    }
+  });
+}
+
+function renderUeDrafts(drafts) {
+  const el = document.getElementById('ueDraftList');
+  el.innerHTML = drafts.map((d, i) => `
+    <div class="ue-draft">
+      <div class="ue-draft-area">${escapeHtml(d.area)}</div>
+      <p class="ue-draft-subject">${escapeHtml(d.subject)}</p>
+      <pre class="ue-draft-body" id="ueBody${i}">${escapeHtml(d.body)}</pre>
+      <div class="ue-draft-actions">
+        <a class="btn btn-primary btn-sm" href="${d.mailto}">Öppna i mailklient</a>
+        <button class="btn btn-ghost btn-sm" data-copy="${i}">Kopiera text</button>
+      </div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('[data-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const text = document.getElementById(`ueBody${btn.dataset.copy}`).textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        const orig = btn.textContent;
+        btn.textContent = 'Kopierat ✓';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      } catch {}
+    });
+  });
 }
 
 // ---------- HELPERS ------------------------------------------------------
