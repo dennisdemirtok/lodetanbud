@@ -9,8 +9,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -18,6 +18,7 @@ from app import __version__
 from app import afb_templates as afb
 from app import ama_catalog
 from app import agent as lodet_agent
+from app import chat as lodet_chat
 from app import file_classifier
 from app import pdf_extractor
 from app import ue_emailer
@@ -244,6 +245,42 @@ async def api_afb_render(
         raise HTTPException(status_code=404, detail=f"Okänd mall: {template_id}")
 
     return JSONResponse({"template_id": template_id, "text": text})
+
+
+# --- Chat (Claude API) ----------------------------------------------------
+
+@app.get("/api/chat/status")
+async def api_chat_status() -> JSONResponse:
+    return JSONResponse({"configured": lodet_chat.is_configured()})
+
+
+@app.post("/api/chat")
+async def api_chat(payload: dict = Body(...)) -> StreamingResponse:
+    messages = payload.get("messages") or []
+    context = payload.get("context")
+
+    if not isinstance(messages, list) or not messages:
+        raise HTTPException(status_code=400, detail="Inga meddelanden mottagna")
+
+    cleaned = []
+    for m in messages[-30:]:
+        role = m.get("role")
+        content = m.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+            cleaned.append({"role": role, "content": content})
+
+    if not cleaned or cleaned[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="Sista meddelandet måste vara från användaren")
+
+    return StreamingResponse(
+        lodet_chat.stream_chat(cleaned, context=context),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # --- Agent / paketanalys --------------------------------------------------

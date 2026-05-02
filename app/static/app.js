@@ -69,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindTemplateForm();
   bindStart();
   bindUeForm();
+  bindChat();
   if (!location.hash) location.hash = '#/start';
   navigate();
 });
@@ -833,6 +834,130 @@ function renderUeDrafts(drafts) {
       } catch {}
     });
   });
+}
+
+// ---------- CHAT (Claude API) -------------------------------------------
+
+const chatHistory = [];
+let chatBusy = false;
+
+function bindChat() {
+  const form = document.getElementById('chatForm');
+  const input = document.getElementById('chatInput');
+  const sendBtn = document.getElementById('chatSendBtn');
+  if (!form) return;
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (chatBusy) return;
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    sendChat(text);
+  });
+
+  fetch('/api/chat/status')
+    .then((r) => r.json())
+    .then((d) => {
+      if (!d.configured) {
+        const status = document.getElementById('chatStatus');
+        status.textContent = 'inte konfigurerad — ANTHROPIC_API_KEY saknas i Railway';
+        status.classList.add('error');
+        input.placeholder = 'Lägg till ANTHROPIC_API_KEY i Railway-variablerna för att aktivera';
+        input.disabled = true;
+        sendBtn.disabled = true;
+      }
+    })
+    .catch(() => {});
+}
+
+function appendChatMessage(role, text) {
+  const wrap = document.getElementById('chatMessages');
+  const el = document.createElement('div');
+  el.className = `chat-message ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble';
+  bubble.textContent = text;
+  el.appendChild(bubble);
+  wrap.appendChild(el);
+  wrap.scrollTop = wrap.scrollHeight;
+  return el;
+}
+
+async function sendChat(userText) {
+  chatBusy = true;
+  const sendBtn = document.getElementById('chatSendBtn');
+  sendBtn.disabled = true;
+
+  appendChatMessage('user', userText);
+  chatHistory.push({ role: 'user', content: userText });
+
+  const agentEl = appendChatMessage('agent', '');
+  agentEl.classList.add('thinking');
+  const bubble = agentEl.querySelector('.chat-bubble');
+
+  let full = '';
+
+  try {
+    const context = lastAnalysis
+      ? {
+          file_count: lastAnalysis.summary.file_count,
+          types: lastAnalysis.summary.type_breakdown,
+          project_name: lastAnalysis.summary.project_name,
+          ue_suggestions: lastAnalysis.ue_suggestions,
+          recommendations: lastAnalysis.recommendations.map((r) => r.title),
+        }
+      : null;
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: chatHistory, context }),
+    });
+
+    if (!res.ok || !res.body) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data: ')) continue;
+        let data;
+        try { data = JSON.parse(line.slice(6)); } catch { continue; }
+        if (data.type === 'token') {
+          full += data.text;
+          bubble.textContent = full;
+          document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+        } else if (data.type === 'error') {
+          throw new Error(data.message);
+        } else if (data.type === 'done') {
+          // optional: log usage
+        }
+      }
+    }
+
+    chatHistory.push({ role: 'assistant', content: full });
+  } catch (e) {
+    bubble.textContent = `⚠ ${e.message || 'Något gick fel'}`;
+    bubble.style.color = 'var(--tegel)';
+    chatHistory.pop();
+  } finally {
+    agentEl.classList.remove('thinking');
+    chatBusy = false;
+    sendBtn.disabled = false;
+    document.getElementById('chatInput').focus();
+  }
 }
 
 // ---------- HELPERS ------------------------------------------------------

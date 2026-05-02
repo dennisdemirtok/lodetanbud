@@ -140,6 +140,29 @@
             <p class="lede">Släpp hela förfrågningspaketet — mängdförteckning, AF-dokument, teknisk beskrivning och ritningar — så går agenten igenom det och föreslår nästa steg.</p>
           </div>
 
+          <section class="chat-panel" id="chatPanel">
+            <div class="chat-head">
+              <span class="agent-avatar">⊥</span>
+              <div>
+                <p class="chat-agent-name">Lodet-agenten</p>
+                <p class="chat-agent-status muted small" id="chatStatus">redo att hjälpa · powered by Claude</p>
+              </div>
+            </div>
+
+            <div class="chat-messages" id="chatMessages">
+              <div class="chat-message agent">
+                <div class="chat-bubble">
+                  Hej! Fråga vad du vill om svenska anbud — AMA-koder, klumpsumma, AFB-bilagor, indexjustering, AB/ABT-villkor. Du kan också ladda upp ett förfrågningspaket nedan så hjälper jag analysera det.
+                </div>
+              </div>
+            </div>
+
+            <form class="chat-input" id="chatForm" autocomplete="off">
+              <input type="text" id="chatInput" placeholder="Skriv en fråga…" maxlength="2000" />
+              <button type="submit" id="chatSendBtn" class="btn btn-primary">Skicka</button>
+            </form>
+          </section>
+
           <div id="multiDropzone" class="dropzone dropzone-multi" tabindex="0" role="button" aria-label="Ladda upp förfrågningspaket">
             <input type="file" id="multiFileInput" accept=".pdf,.csv,.xlsx,.xlsm,.xls" multiple hidden />
             <div class="dropzone-content">

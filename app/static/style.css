@@ -966,6 +966,127 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
 .empty-state p { margin: 0 0 8px; }
 
 /* ========================================================================
+   CHAT-PANEL (Lodet-agenten)
+   ======================================================================== */
+.chat-panel {
+  background: var(--krita);
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius-lg);
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--linjegra);
+  background: linear-gradient(180deg, var(--krita) 0%, #FAFAF7 100%);
+}
+
+.chat-agent-name {
+  margin: 0;
+  font-weight: 600;
+  color: var(--lodbla);
+  font-size: 1rem;
+}
+.chat-agent-status { margin: 0; }
+.chat-agent-status.error { color: var(--tegel); font-weight: 500; }
+
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  max-height: 480px;
+  overflow-y: auto;
+  background: var(--mursand);
+}
+
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 84%;
+}
+.chat-message.user { align-self: flex-end; align-items: flex-end; }
+.chat-message.agent { align-self: flex-start; }
+
+.chat-bubble {
+  padding: 11px 14px;
+  border-radius: 12px;
+  font-size: 0.94rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.chat-message.user .chat-bubble {
+  background: var(--lodbla);
+  color: var(--krita);
+  border-bottom-right-radius: 4px;
+}
+
+.chat-message.agent .chat-bubble {
+  background: var(--krita);
+  color: var(--jarn);
+  border: 1px solid var(--linjegra);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-message.agent.thinking .chat-bubble::after {
+  content: '▍';
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--ockra);
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.chat-input {
+  display: flex;
+  gap: 8px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--linjegra);
+  background: var(--krita);
+}
+
+.chat-input input {
+  flex: 1;
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 10px 14px;
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius);
+  background: var(--mursand);
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.chat-input input:focus {
+  border-color: var(--ockra);
+  background: var(--krita);
+}
+
+.chat-input button {
+  padding: 9px 18px;
+}
+
+.chat-disabled {
+  padding: 18px 20px;
+  background: #FBF1D8;
+  color: #8A6A0F;
+  border-top: 1px solid var(--linjegra);
+  font-size: 0.9rem;
+}
+
+/* ========================================================================
    AGENT / START-VY
    ======================================================================== */
 .dropzone-multi {
