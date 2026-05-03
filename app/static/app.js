@@ -745,6 +745,10 @@ function switchAgentMode(mode) {
     document.getElementById('agentStatus').hidden = true;
     const dp = document.getElementById('draftPanel');
     if (dp) dp.hidden = true;
+    const banner = document.getElementById('caseCreatedBanner');
+    if (banner) banner.hidden = true;
+    const mfPanel = document.getElementById('mfEditorPanel');
+    if (mfPanel) mfPanel.hidden = true;
   }
 }
 
@@ -835,12 +839,21 @@ function renderMultiAgentResult(data) {
 
   agentPanel.hidden = false;
 
-  // Anbudsutkast — visa drafts för första casen i multi-resultatet
-  const firstCaseId = data.results[0]?.saved_case?.id;
+  // Anbudsutkast + MF-editor — fokuserar på första casen i multi-resultatet
+  const firstResult = data.results[0];
+  const firstCaseId = firstResult?.saved_case?.id;
   if (firstCaseId) {
+    showCaseBanner(firstResult.saved_case, firstResult.analysis);
     loadDraftPanel(firstCaseId);
+    if (firstResult.analysis?.summary?.has_mf) {
+      loadMfEditor(firstCaseId);
+    } else {
+      document.getElementById('mfEditorPanel').hidden = true;
+    }
   } else {
+    document.getElementById('caseCreatedBanner').hidden = true;
     document.getElementById('draftPanel').hidden = true;
+    document.getElementById('mfEditorPanel').hidden = true;
     agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
@@ -932,11 +945,18 @@ function renderAgentResult(analysis, savedCase) {
 
   agentPanel.hidden = false;
 
-  // Anbudsutkast-panel: ladda required_docs för casen
   if (savedCase && savedCase.id) {
+    showCaseBanner(savedCase, analysis);
     loadDraftPanel(savedCase.id);
+    if (analysis.summary?.has_mf) {
+      loadMfEditor(savedCase.id);
+    } else {
+      document.getElementById('mfEditorPanel').hidden = true;
+    }
   } else {
+    document.getElementById('caseCreatedBanner').hidden = true;
     document.getElementById('draftPanel').hidden = true;
+    document.getElementById('mfEditorPanel').hidden = true;
     agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
@@ -1157,6 +1177,280 @@ function downloadCaseMfExcel(caseId) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+// ---------- ANBUD-BANNER ------------------------------------------------
+
+function showCaseBanner(savedCase, analysis) {
+  const banner = document.getElementById('caseCreatedBanner');
+  if (!banner) return;
+  const titleEl = document.getElementById('caseBannerTitle');
+  const metaEl = document.getElementById('caseBannerMeta');
+  const idEl = document.getElementById('caseBannerId');
+
+  const project = analysis?.summary?.project_name || savedCase?.project_name || 'Okänt projekt';
+  const fileCount = analysis?.summary?.file_count || (analysis?.files || []).length;
+  const lessonCount = (savedCase?.lessons || []).length;
+  const reqCount = (savedCase?.required_docs || []).length;
+
+  titleEl.textContent = project;
+  const parts = [];
+  if (fileCount) parts.push(`${fileCount} fil${fileCount === 1 ? '' : 'er'}`);
+  if (reqCount) parts.push(`${reqCount} krav i anbudet`);
+  if (lessonCount) parts.push(`${lessonCount} lärdomar i kunskapsbasen`);
+  metaEl.textContent = parts.join(' · ') || 'Sparat';
+
+  if (savedCase?.id) {
+    idEl.textContent = savedCase.id;
+    idEl.title = savedCase.id;
+  }
+
+  banner.hidden = false;
+}
+
+// ---------- MF-EDITOR (redigerbar mängdförteckning) --------------------
+
+let mfEditorState = {
+  caseId: null,
+  parsedMf: null,
+  originalMf: null,
+  dirty: false,
+};
+
+async function loadMfEditor(caseId) {
+  const panel = document.getElementById('mfEditorPanel');
+  if (!panel) return;
+  const tbody = document.querySelector('#mfEditorTable tbody');
+  const meta = document.getElementById('mfEditorMeta');
+
+  panel.hidden = false;
+  tbody.innerHTML = '<tr><td colspan="6" class="mf-row-empty">Laddar mängdförteckning…</td></tr>';
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/mf`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        panel.hidden = true;
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const parsedMf = await res.json();
+    mfEditorState = {
+      caseId,
+      parsedMf,
+      originalMf: JSON.parse(JSON.stringify(parsedMf)),
+      dirty: false,
+    };
+    renderMfEditorRows();
+    bindMfEditorActions();
+    updateMfTotals();
+    updateMfDirtyState();
+
+    const lineCount = (parsedMf.lines || []).length;
+    const priced = (parsedMf.lines || []).filter((l) => l.unit_price != null).length;
+    meta.textContent = `${lineCount} rader · ${priced} prissatta`;
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="mf-row-empty">Fel: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderMfEditorRows() {
+  const tbody = document.querySelector('#mfEditorTable tbody');
+  if (!tbody || !mfEditorState.parsedMf) return;
+
+  const lines = mfEditorState.parsedMf.lines || [];
+  const html = [];
+  let currentSection = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const sectionLetter = (line.ama_code || '')[0];
+    if (sectionLetter && sectionLetter !== currentSection) {
+      currentSection = sectionLetter;
+      html.push(`
+        <tr class="section-row" data-section="${escapeHtml(sectionLetter)}">
+          <td colspan="6">${escapeHtml(sectionLabel(sectionLetter))}<span class="section-total" data-section-total="${escapeHtml(sectionLetter)}">—</span></td>
+        </tr>
+      `);
+    }
+    const isLump = !!line.is_lump_sum;
+    const qty = line.quantity == null ? '' : line.quantity;
+    const price = line.unit_price == null ? '' : line.unit_price;
+    const amount = line.total_amount == null ? null : line.total_amount;
+    html.push(`
+      <tr class="mf-row${isLump ? ' lump-row' : ''}" data-line-index="${i}">
+        <td class="mono">${escapeHtml(line.ama_code || '—')}</td>
+        <td>${escapeHtml(line.description || '')}</td>
+        <td class="col-num mono">${escapeHtml(line.unit || '—')}</td>
+        <td class="col-num mono">${formatNum(qty === '' ? null : qty)}</td>
+        <td class="col-num">
+          ${isLump
+            ? `<span class="mono">—</span>`
+            : `<input type="number" class="mf-price-input" step="0.01" min="0" data-line-index="${i}" value="${price === '' ? '' : price}" />`}
+        </td>
+        <td class="col-num"><span class="mf-amount" data-amount-for="${i}">${amount == null ? '—' : `${fmtSEK.format(amount)} kr`}</span></td>
+      </tr>
+    `);
+  }
+
+  tbody.innerHTML = html.join('') || '<tr><td colspan="6" class="mf-row-empty">Inga rader</td></tr>';
+
+  tbody.querySelectorAll('.mf-price-input').forEach((inp) => {
+    inp.addEventListener('input', onMfPriceChange);
+    inp.addEventListener('focus', () => inp.select());
+  });
+}
+
+function onMfPriceChange(e) {
+  const inp = e.target;
+  const idx = parseInt(inp.dataset.lineIndex, 10);
+  if (Number.isNaN(idx)) return;
+  const line = (mfEditorState.parsedMf?.lines || [])[idx];
+  if (!line) return;
+
+  const raw = inp.value.trim();
+  const newPrice = raw === '' ? null : Number(raw);
+  if (raw !== '' && Number.isNaN(newPrice)) return;
+
+  line.unit_price = newPrice;
+
+  // Räkna om belopp
+  let newAmount = null;
+  if (line.quantity != null && newPrice != null) {
+    newAmount = round2(Number(line.quantity) * newPrice);
+  }
+  line.total_amount = newAmount;
+
+  // Uppdatera amount-cellen
+  const amountEl = document.querySelector(`[data-amount-for="${idx}"]`);
+  if (amountEl) {
+    amountEl.textContent = newAmount == null ? '—' : `${fmtSEK.format(newAmount)} kr`;
+    const orig = mfEditorState.originalMf.lines[idx];
+    const changed = (orig?.unit_price ?? null) !== newPrice;
+    amountEl.classList.toggle('changed', changed);
+    inp.classList.toggle('dirty', changed);
+  }
+
+  mfEditorState.dirty = isMfDirty();
+  updateMfTotals();
+  updateMfDirtyState();
+}
+
+function isMfDirty() {
+  const cur = mfEditorState.parsedMf?.lines || [];
+  const orig = mfEditorState.originalMf?.lines || [];
+  if (cur.length !== orig.length) return true;
+  for (let i = 0; i < cur.length; i++) {
+    if ((cur[i].unit_price ?? null) !== (orig[i].unit_price ?? null)) return true;
+  }
+  return false;
+}
+
+function updateMfTotals() {
+  const lines = mfEditorState.parsedMf?.lines || [];
+  let grandTotal = 0;
+  const sectionTotals = {};
+
+  for (const line of lines) {
+    const amount = line.total_amount;
+    if (amount == null) continue;
+    grandTotal += amount;
+    const sec = (line.ama_code || '')[0];
+    if (sec) {
+      sectionTotals[sec] = (sectionTotals[sec] || 0) + amount;
+    }
+  }
+
+  const totalEl = document.getElementById('mfGrandTotal');
+  if (totalEl) totalEl.textContent = `${fmtSEK.format(round2(grandTotal))} kr`;
+
+  document.querySelectorAll('[data-section-total]').forEach((el) => {
+    const sec = el.dataset.sectionTotal;
+    const t = sectionTotals[sec];
+    el.textContent = t ? `${fmtSEK.format(round2(t))} kr` : '';
+  });
+}
+
+function updateMfDirtyState() {
+  const mark = document.getElementById('mfDirtyMark');
+  const saveBtn = document.getElementById('mfSaveBtn');
+  if (mark) mark.hidden = !mfEditorState.dirty;
+  if (saveBtn) saveBtn.disabled = !mfEditorState.dirty;
+}
+
+function bindMfEditorActions() {
+  const saveBtn = document.getElementById('mfSaveBtn');
+  const revertBtn = document.getElementById('mfRevertBtn');
+  const excelBtn = document.getElementById('mfExcelBtn');
+  if (saveBtn && !saveBtn._bound) {
+    saveBtn.addEventListener('click', saveMfEditor);
+    saveBtn._bound = true;
+  }
+  if (revertBtn && !revertBtn._bound) {
+    revertBtn.addEventListener('click', revertMfEditor);
+    revertBtn._bound = true;
+  }
+  if (excelBtn && !excelBtn._bound) {
+    excelBtn.addEventListener('click', () => {
+      if (mfEditorState.caseId) downloadCaseMfExcel(mfEditorState.caseId);
+    });
+    excelBtn._bound = true;
+  }
+}
+
+async function saveMfEditor() {
+  if (!mfEditorState.caseId || !mfEditorState.parsedMf) return;
+  const saveBtn = document.getElementById('mfSaveBtn');
+  const original = saveBtn.textContent;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Sparar…';
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(mfEditorState.caseId)}/mf`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parsed_mf: mfEditorState.parsedMf }),
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+    const d = await res.json();
+    // Re-baseline: original ← current
+    mfEditorState.originalMf = JSON.parse(JSON.stringify(mfEditorState.parsedMf));
+    mfEditorState.dirty = false;
+    document.querySelectorAll('.mf-price-input.dirty').forEach((el) => el.classList.remove('dirty'));
+    document.querySelectorAll('.mf-amount.changed').forEach((el) => el.classList.remove('changed'));
+    updateMfDirtyState();
+    saveBtn.textContent = 'Sparat ✓';
+    setTimeout(() => { saveBtn.textContent = original; }, 1200);
+
+    // Uppdatera banner-meta om totalen ändrats
+    const banner = document.getElementById('caseBannerMeta');
+    if (banner && d.total_amount_sek != null) {
+      // best effort — uppdaterar inte rest av meta, bara om vi ser totalen
+    }
+  } catch (e) {
+    saveBtn.textContent = original;
+    alert(`Kunde inte spara: ${e.message}`);
+  } finally {
+    saveBtn.disabled = !mfEditorState.dirty;
+  }
+}
+
+function revertMfEditor() {
+  if (!mfEditorState.originalMf) return;
+  if (mfEditorState.dirty && !confirm('Återställa alla ändringar?')) return;
+  mfEditorState.parsedMf = JSON.parse(JSON.stringify(mfEditorState.originalMf));
+  mfEditorState.dirty = false;
+  renderMfEditorRows();
+  updateMfTotals();
+  updateMfDirtyState();
+}
+
+function round2(v) {
+  return Math.round(v * 100) / 100;
 }
 
 function bindDraftModal() {

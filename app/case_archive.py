@@ -198,6 +198,21 @@ def update_required_docs(case_id: str, required_docs: list[dict]) -> bool:
     return True
 
 
+def update_parsed_mf(case_id: str, parsed_mf: dict) -> bool:
+    """Spara redigerad mängdförteckning. Synkar total_amount_sek på case-nivå."""
+    _ensure_dirs()
+    case = get_case(case_id)
+    if case is None:
+        return False
+    case["parsed_mf"] = parsed_mf
+    meta = parsed_mf.get("metadata") or {}
+    if meta.get("total_amount_sek") is not None:
+        case["total_amount_sek"] = meta["total_amount_sek"]
+    path = _CASES_DIR / f"{case_id}.json"
+    path.write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
 def update_draft(case_id: str, doc_id: str, text: str, edited: bool = False) -> bool:
     """Spara ett genererat eller redigerat utkast för ett krav."""
     _ensure_dirs()

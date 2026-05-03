@@ -1922,6 +1922,270 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
 }
 
 /* ========================================================================
+   ANBUD-BANNER (visas efter upload)
+   ======================================================================== */
+.case-banner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 22px;
+  background: linear-gradient(135deg, #FFFEF8 0%, var(--krita) 100%);
+  border: 1px solid var(--ockra);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  margin-bottom: 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.case-banner::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--ockra);
+}
+
+.case-banner-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--ockra);
+  color: var(--lodbla);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.case-banner-body {
+  min-width: 0;
+}
+
+.case-banner-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8A6A0F;
+  margin: 0 0 4px;
+  font-weight: 500;
+}
+
+.case-banner-title {
+  font-family: var(--font-serif);
+  font-size: 1.3rem;
+  font-weight: 500;
+  color: var(--lodbla);
+  margin: 0;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.case-banner-meta {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+.case-banner-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.case-banner-id {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: var(--ljusgra);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.case-banner-link {
+  font-size: 0.82rem;
+  color: var(--lodbla);
+  font-weight: 500;
+}
+.case-banner-link:hover { text-decoration: underline; color: var(--tegel); }
+
+/* ========================================================================
+   MF-EDITOR (Fortnox-likt redigerbar tabell)
+   ======================================================================== */
+.mf-editor-panel { padding: 0; }
+
+.mf-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--linjegra);
+  background: var(--bg-sidebar);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.mf-grand-total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mf-grand-total-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
+
+.mf-grand-total-value {
+  font-family: var(--font-mono);
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--lodbla);
+}
+
+.mf-grand-total-dirty {
+  font-size: 0.78rem;
+  color: var(--tegel);
+  font-weight: 500;
+}
+
+.mf-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mf-editor-table-wrap {
+  overflow-x: auto;
+  max-height: 640px;
+}
+
+.mf-editor-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.mf-editor-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--ljusgra);
+  z-index: 2;
+}
+
+.mf-editor-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--lodbla);
+  border-bottom: 1px solid var(--linjegra);
+  white-space: nowrap;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mf-editor-table th.col-num,
+.mf-editor-table td.col-num { text-align: right; }
+.mf-editor-table th.col-desc { width: 100%; }
+
+.mf-editor-table td {
+  padding: 4px 14px;
+  border-bottom: 1px solid #F0EBDF;
+  vertical-align: middle;
+}
+
+.mf-editor-table tr.section-row td {
+  background: var(--lodbla);
+  color: var(--krita);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  padding: 8px 14px;
+  text-transform: none;
+}
+
+.mf-editor-table tr.section-row td .section-total {
+  float: right;
+  font-family: var(--font-mono);
+  color: var(--ockra);
+}
+
+.mf-editor-table tr.lump-row td {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.mf-editor-table tr.mf-row:hover { background: var(--bg-sidebar); }
+
+.mf-editor-table td.mono {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.mf-price-input {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  width: 100%;
+  max-width: 110px;
+  padding: 5px 8px;
+  text-align: right;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--jarn);
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.mf-price-input:hover {
+  border-color: var(--linjegra);
+  background: var(--krita);
+}
+
+.mf-price-input:focus {
+  border-color: var(--lodbla);
+  background: var(--krita);
+  box-shadow: 0 0 0 2px rgba(28, 44, 58, 0.08);
+}
+
+.mf-price-input.dirty {
+  border-color: var(--ockra);
+  background: #FFFEF8;
+}
+
+.mf-amount {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  color: var(--lodbla);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mf-amount.changed { color: var(--tegel); }
+
+.mf-row-empty {
+  text-align: center;
+  padding: 36px;
+  color: var(--muted);
+}
+
+/* ========================================================================
    ANBUDSUTKAST (drafts per case)
    ======================================================================== */
 .draft-panel { margin-top: 0; }

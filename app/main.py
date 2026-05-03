@@ -661,6 +661,62 @@ async def api_case_draft_pdf(case_id: str, doc_id: str) -> Response:
     )
 
 
+@app.get("/api/cases/{case_id}/mf")
+async def api_case_mf_get(case_id: str) -> JSONResponse:
+    """Hämta nuvarande mängdförteckning för ett case (för editor)."""
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    parsed_mf = case.get("parsed_mf")
+    if not parsed_mf:
+        raise HTTPException(status_code=404, detail="Ingen mängdförteckning hittades i detta case")
+
+    return JSONResponse(parsed_mf)
+
+
+@app.put("/api/cases/{case_id}/mf")
+async def api_case_mf_update(case_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Spara redigerad mängdförteckning (à-priser/belopp). Räknar om totalbelopp."""
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    parsed_mf = payload.get("parsed_mf")
+    if not isinstance(parsed_mf, dict):
+        raise HTTPException(status_code=400, detail="parsed_mf saknas eller har fel format")
+
+    lines = parsed_mf.get("lines") or []
+
+    # Räkna om belopp per rad och totalbelopp baserat på unit_price * quantity
+    total = 0.0
+    for line in lines:
+        if line.get("is_lump_sum"):
+            amount = line.get("total_amount")
+            total += amount or 0
+            continue
+        qty = line.get("quantity")
+        price = line.get("unit_price")
+        if qty is not None and price is not None:
+            amount = round(float(qty) * float(price), 2)
+            line["total_amount"] = amount
+            total += amount
+
+    meta = parsed_mf.get("metadata") or {}
+    meta["total_amount_sek"] = round(total, 2)
+    parsed_mf["metadata"] = meta
+
+    if not case_archive.update_parsed_mf(case_id, parsed_mf):
+        raise HTTPException(status_code=500, detail="Kunde inte spara MF")
+
+    return JSONResponse({
+        "case_id": case_id,
+        "total_amount_sek": round(total, 2),
+        "line_count": len(lines),
+        "saved_at": _local_timestamp(),
+    })
+
+
 @app.get("/api/cases/{case_id}/mf/excel")
 async def api_case_mf_excel(case_id: str) -> Response:
     """Returnera ifylld mängdförteckning som Excel-mall."""

@@ -309,6 +309,19 @@
 
               <div id="agentStatus" class="status" hidden></div>
 
+              <div id="caseCreatedBanner" class="case-banner" hidden>
+                <span class="case-banner-icon">✓</span>
+                <div class="case-banner-body">
+                  <p class="case-banner-eyebrow">Nytt anbud skapat</p>
+                  <h2 class="case-banner-title" id="caseBannerTitle">—</h2>
+                  <p class="case-banner-meta" id="caseBannerMeta">—</p>
+                </div>
+                <div class="case-banner-side">
+                  <span class="case-banner-id" id="caseBannerId">—</span>
+                  <a class="case-banner-link" data-route="#/kunskapsbas">Hämta senare i kunskapsbasen ↗</a>
+                </div>
+              </div>
+
               <div id="filesPanel" class="panel" hidden>
                 <div class="panel-head">
                   <h2>Filer i paketet</h2>
@@ -336,6 +349,40 @@
                   <span class="muted small" id="draftPanelMeta"></span>
                 </div>
                 <div id="draftList" class="draft-list"></div>
+              </div>
+
+              <div id="mfEditorPanel" class="panel mf-editor-panel" hidden>
+                <div class="panel-head">
+                  <h2>Mängdförteckning — redigerbar</h2>
+                  <span class="muted small" id="mfEditorMeta"></span>
+                </div>
+                <div class="mf-editor-toolbar">
+                  <div class="mf-grand-total">
+                    <span class="mf-grand-total-label">Totalsumma exkl. moms</span>
+                    <span class="mf-grand-total-value" id="mfGrandTotal">—</span>
+                    <span class="mf-grand-total-dirty" id="mfDirtyMark" hidden>· ej sparat</span>
+                  </div>
+                  <div class="mf-editor-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" id="mfRevertBtn">Återställ</button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="mfExcelBtn">Hämta Excel</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="mfSaveBtn">Spara</button>
+                  </div>
+                </div>
+                <div class="mf-editor-table-wrap">
+                  <table id="mfEditorTable" class="mf-editor-table">
+                    <thead>
+                      <tr>
+                        <th>AMA-kod</th>
+                        <th class="col-desc">Beskrivning</th>
+                        <th class="col-num">Enhet</th>
+                        <th class="col-num">Antal</th>
+                        <th class="col-num">À-pris (kr)</th>
+                        <th class="col-num">Belopp</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
               </div>
 
               <form class="chat-input chat-input-floating" id="chatFormBottom" autocomplete="off">
