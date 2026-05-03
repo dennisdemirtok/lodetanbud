@@ -363,7 +363,9 @@
                     <span class="mf-grand-total-dirty" id="mfDirtyMark" hidden>· ej sparat</span>
                   </div>
                   <div class="mf-editor-actions">
+                    <span class="mf-autosave-status muted small" id="mfAutosaveStatus"></span>
                     <button type="button" class="btn btn-ghost btn-sm" id="mfRevertBtn">Återställ</button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="mfCsvBtn">Hämta CSV</button>
                     <button type="button" class="btn btn-ghost btn-sm" id="mfExcelBtn">Hämta Excel</button>
                     <button type="button" class="btn btn-primary btn-sm" id="mfSaveBtn">Spara</button>
                   </div>
@@ -378,10 +380,14 @@
                         <th class="col-num">Antal</th>
                         <th class="col-num">À-pris (kr)</th>
                         <th class="col-num">Belopp</th>
+                        <th class="col-action"></th>
                       </tr>
                     </thead>
                     <tbody></tbody>
                   </table>
+                </div>
+                <div class="mf-editor-footer">
+                  <button type="button" class="btn btn-ghost btn-sm" id="mfAddRowBtn">+ Ny rad</button>
                 </div>
               </div>
 

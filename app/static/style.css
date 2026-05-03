@@ -2138,13 +2138,11 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   white-space: nowrap;
 }
 
-.mf-price-input {
-  font-family: var(--font-mono);
+.mf-cell-input {
+  font: inherit;
   font-size: 0.86rem;
   width: 100%;
-  max-width: 110px;
   padding: 5px 8px;
-  text-align: right;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
@@ -2153,18 +2151,29 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   transition: border-color 0.12s, background 0.12s;
 }
 
-.mf-price-input:hover {
+.mf-cell-input.mono {
+  font-family: var(--font-mono);
+  text-align: right;
+  max-width: 110px;
+}
+
+.mf-cell-input.desc {
+  text-align: left;
+  min-width: 200px;
+}
+
+.mf-cell-input:hover {
   border-color: var(--linjegra);
   background: var(--krita);
 }
 
-.mf-price-input:focus {
+.mf-cell-input:focus {
   border-color: var(--lodbla);
   background: var(--krita);
   box-shadow: 0 0 0 2px rgba(28, 44, 58, 0.08);
 }
 
-.mf-price-input.dirty {
+.mf-cell-input.dirty {
   border-color: var(--ockra);
   background: #FFFEF8;
 }
@@ -2183,6 +2192,47 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   text-align: center;
   padding: 36px;
   color: var(--muted);
+}
+
+.mf-editor-table th.col-action,
+.mf-editor-table td.col-action {
+  width: 36px;
+  text-align: center;
+  padding: 4px 6px;
+}
+
+.mf-row-delete {
+  background: none;
+  border: none;
+  color: var(--muted-2);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  transition: background 0.12s, color 0.12s;
+}
+.mf-row-delete:hover {
+  background: #F0DDD3;
+  color: var(--tegel);
+}
+
+.mf-editor-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--linjegra);
+  background: var(--bg-sidebar);
+}
+
+.mf-autosave-status {
+  margin-right: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.mf-autosave-status.saved { color: var(--salvia); }
+.mf-autosave-status.saving { color: var(--ockra); }
+.mf-autosave-status.error { color: var(--tegel); }
+
+.mf-row-new td {
+  background: #FFFEF8;
 }
 
 /* ========================================================================

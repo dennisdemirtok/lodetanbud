@@ -39,6 +39,26 @@ const ROUTES = {
 
 function navigate() {
   const hash = location.hash || '#/start';
+
+  // Dynamisk route: #/anbud/edit/{case_id}
+  const editMatch = hash.match(/^#\/anbud\/edit\/(.+)$/);
+  if (editMatch) {
+    const caseId = decodeURIComponent(editMatch[1]);
+    document.querySelectorAll('.view').forEach((v) => v.hidden = true);
+    const viewEl = document.querySelector('[data-view="start"]');
+    if (viewEl) viewEl.hidden = false;
+    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    document.querySelector('.tab[data-tab="anbud"]')?.classList.add('active');
+    document.querySelectorAll('.sidebar-section').forEach((s) => s.hidden = true);
+    const sb = document.querySelector('.sidebar-section[data-sidebar="anbud"]');
+    if (sb) sb.hidden = false;
+    document.querySelectorAll('.sidebar-link').forEach((el) => el.classList.remove('active'));
+    document.querySelectorAll('.sidebar.open').forEach((s) => s.classList.remove('open'));
+    window.scrollTo({ top: 0 });
+    loadCaseInEditor(caseId);
+    return;
+  }
+
   const route = ROUTES[hash] || ROUTES['#/start'];
 
   // Visa rätt view
@@ -392,31 +412,52 @@ function loadHistory() {
   catch { return []; }
 }
 
-function renderActiveBids() {
-  const list = loadHistory();
+async function renderActiveBids() {
   const el = document.getElementById('localBidsList');
-  if (list.length === 0) {
-    el.innerHTML = '<div class="empty-state"><p>Inga utkast än. Ladda upp en CSV via "Nytt anbud".</p></div>';
-    return;
-  }
-  el.innerHTML = list.map((b) => `
-    <div class="bid-row">
-      <div>
-        <div class="bid-name">${escapeHtml(b.project || '—')}</div>
-        <div class="bid-meta">${escapeHtml(b.document_number || '')} · ${b.line_count} rader · ${b.ama_codes.length} AMA-koder</div>
-      </div>
-      <div class="bid-amount">${b.total_amount_sek ? fmtSEK.format(b.total_amount_sek) + ' kr' : '—'}</div>
-      <div class="bid-date">${formatRelDate(b.saved_at)}</div>
-      <div></div>
-    </div>
-  `).join('');
+  el.innerHTML = '<div class="empty-state"><p>Laddar anbud …</p></div>';
 
-  document.getElementById('clearLocalBtn').addEventListener('click', () => {
-    if (confirm('Rensa all lokal historik?')) {
-      localStorage.removeItem(STORAGE_KEY);
-      renderActiveBids();
+  try {
+    const res = await fetch('/api/cases');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    const cases = d.cases || [];
+
+    if (cases.length === 0) {
+      el.innerHTML = '<div class="empty-state"><p>Inga anbud än. Ladda upp ett förfrågningsunderlag på <a href="#/start">Agent-sidan</a>.</p></div>';
+      return;
     }
-  }, { once: true });
+
+    el.innerHTML = cases.map((c) => {
+      const reqCount = c.required_count || 0;
+      const draftCount = c.draft_count || 0;
+      const progress = reqCount > 0 ? `${draftCount}/${reqCount} utkast` : '—';
+      return `
+        <div class="bid-row" data-case-id="${escapeHtml(c.id)}">
+          <div>
+            <div class="bid-name">${escapeHtml(c.project_name || c.source_name || '—')}</div>
+            <div class="bid-meta">${escapeHtml(c.document_number || '')} ${c.document_number ? '· ' : ''}${c.file_count} filer · ${progress}</div>
+          </div>
+          <div class="bid-amount">${c.total_amount_sek ? fmtSEK.format(c.total_amount_sek) + ' kr' : '—'}</div>
+          <div class="bid-date">${formatRelDate(c.created_at)}</div>
+          <div></div>
+        </div>
+      `;
+    }).join('');
+
+    el.querySelectorAll('.bid-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        location.hash = `#/anbud/edit/${encodeURIComponent(row.dataset.caseId)}`;
+      });
+    });
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
+  }
+
+  const clearBtn = document.getElementById('clearLocalBtn');
+  if (clearBtn && !clearBtn._bound) {
+    clearBtn.style.display = 'none';  // Inte längre relevant — case-arkivet styrs via /kunskapsbas-vyn
+    clearBtn._bound = true;
+  }
 }
 
 function renderDocsMf() {
@@ -1270,71 +1311,153 @@ function renderMfEditorRows() {
       currentSection = sectionLetter;
       html.push(`
         <tr class="section-row" data-section="${escapeHtml(sectionLetter)}">
-          <td colspan="6">${escapeHtml(sectionLabel(sectionLetter))}<span class="section-total" data-section-total="${escapeHtml(sectionLetter)}">—</span></td>
+          <td colspan="7">${escapeHtml(sectionLabel(sectionLetter))}<span class="section-total" data-section-total="${escapeHtml(sectionLetter)}">—</span></td>
         </tr>
       `);
     }
-    const isLump = !!line.is_lump_sum;
-    const qty = line.quantity == null ? '' : line.quantity;
-    const price = line.unit_price == null ? '' : line.unit_price;
-    const amount = line.total_amount == null ? null : line.total_amount;
-    html.push(`
-      <tr class="mf-row${isLump ? ' lump-row' : ''}" data-line-index="${i}">
-        <td class="mono">${escapeHtml(line.ama_code || '—')}</td>
-        <td>${escapeHtml(line.description || '')}</td>
-        <td class="col-num mono">${escapeHtml(line.unit || '—')}</td>
-        <td class="col-num mono">${formatNum(qty === '' ? null : qty)}</td>
-        <td class="col-num">
-          ${isLump
-            ? `<span class="mono">—</span>`
-            : `<input type="number" class="mf-price-input" step="0.01" min="0" data-line-index="${i}" value="${price === '' ? '' : price}" />`}
-        </td>
-        <td class="col-num"><span class="mf-amount" data-amount-for="${i}">${amount == null ? '—' : `${fmtSEK.format(amount)} kr`}</span></td>
-      </tr>
-    `);
+    html.push(renderMfRow(line, i));
   }
 
-  tbody.innerHTML = html.join('') || '<tr><td colspan="6" class="mf-row-empty">Inga rader</td></tr>';
+  tbody.innerHTML = html.join('') || '<tr><td colspan="7" class="mf-row-empty">Inga rader</td></tr>';
 
-  tbody.querySelectorAll('.mf-price-input').forEach((inp) => {
-    inp.addEventListener('input', onMfPriceChange);
-    inp.addEventListener('focus', () => inp.select());
+  tbody.querySelectorAll('.mf-cell-input').forEach((inp) => {
+    inp.addEventListener('input', onMfFieldChange);
+    inp.addEventListener('focus', () => {
+      if (inp.classList.contains('mono')) inp.select();
+    });
+  });
+  tbody.querySelectorAll('.mf-row-delete').forEach((btn) => {
+    btn.addEventListener('click', onMfDeleteRow);
   });
 }
 
-function onMfPriceChange(e) {
+function renderMfRow(line, i) {
+  const isLump = !!line.is_lump_sum;
+  const isNew = !!line._new;
+  const qty = line.quantity == null ? '' : line.quantity;
+  const price = line.unit_price == null ? '' : line.unit_price;
+  const amount = line.total_amount == null ? null : line.total_amount;
+
+  return `
+    <tr class="mf-row${isLump ? ' lump-row' : ''}${isNew ? ' mf-row-new' : ''}" data-line-index="${i}">
+      <td><input type="text" class="mf-cell-input mono" data-field="ama_code" data-line-index="${i}" value="${escapeAttr(line.ama_code || '')}" style="max-width: 100px; text-align: left;" /></td>
+      <td><input type="text" class="mf-cell-input desc" data-field="description" data-line-index="${i}" value="${escapeAttr(line.description || '')}" /></td>
+      <td class="col-num"><input type="text" class="mf-cell-input mono" data-field="unit" data-line-index="${i}" value="${escapeAttr(line.unit || '')}" style="max-width: 60px;" /></td>
+      <td class="col-num">
+        ${isLump
+          ? `<span class="mono">—</span>`
+          : `<input type="number" class="mf-cell-input mono" step="0.01" data-field="quantity" data-line-index="${i}" value="${qty}" />`}
+      </td>
+      <td class="col-num">
+        ${isLump
+          ? `<span class="mono">—</span>`
+          : `<input type="number" class="mf-cell-input mono" step="0.01" data-field="unit_price" data-line-index="${i}" value="${price}" />`}
+      </td>
+      <td class="col-num"><span class="mf-amount" data-amount-for="${i}">${amount == null ? '—' : `${fmtSEK.format(amount)} kr`}</span></td>
+      <td class="col-action">
+        <button type="button" class="mf-row-delete" data-line-index="${i}" title="Ta bort rad" aria-label="Ta bort rad">✕</button>
+      </td>
+    </tr>
+  `;
+}
+
+function escapeAttr(s) {
+  return String(s ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function onMfFieldChange(e) {
   const inp = e.target;
+  const field = inp.dataset.field;
   const idx = parseInt(inp.dataset.lineIndex, 10);
   if (Number.isNaN(idx)) return;
   const line = (mfEditorState.parsedMf?.lines || [])[idx];
   if (!line) return;
 
-  const raw = inp.value.trim();
-  const newPrice = raw === '' ? null : Number(raw);
-  if (raw !== '' && Number.isNaN(newPrice)) return;
-
-  line.unit_price = newPrice;
-
-  // Räkna om belopp
-  let newAmount = null;
-  if (line.quantity != null && newPrice != null) {
-    newAmount = round2(Number(line.quantity) * newPrice);
+  if (field === 'description' || field === 'ama_code' || field === 'unit') {
+    line[field] = inp.value;
+  } else {
+    const raw = inp.value.trim();
+    const num = raw === '' ? null : Number(raw);
+    if (raw !== '' && Number.isNaN(num)) return;
+    line[field] = num;
   }
-  line.total_amount = newAmount;
 
-  // Uppdatera amount-cellen
-  const amountEl = document.querySelector(`[data-amount-for="${idx}"]`);
-  if (amountEl) {
-    amountEl.textContent = newAmount == null ? '—' : `${fmtSEK.format(newAmount)} kr`;
-    const orig = mfEditorState.originalMf.lines[idx];
-    const changed = (orig?.unit_price ?? null) !== newPrice;
-    amountEl.classList.toggle('changed', changed);
+  // Räkna om belopp om quantity eller unit_price ändrats
+  if (field === 'quantity' || field === 'unit_price') {
+    let newAmount = null;
+    if (line.quantity != null && line.unit_price != null) {
+      newAmount = round2(Number(line.quantity) * Number(line.unit_price));
+    }
+    line.total_amount = newAmount;
+    const amountEl = document.querySelector(`[data-amount-for="${idx}"]`);
+    if (amountEl) {
+      amountEl.textContent = newAmount == null ? '—' : `${fmtSEK.format(newAmount)} kr`;
+      const orig = mfEditorState.originalMf.lines[idx];
+      const changed = (orig?.[field] ?? null) !== line[field];
+      amountEl.classList.toggle('changed', changed);
+    }
+  }
+
+  // Markera input som dirty om det skiljer sig från originalet
+  const orig = mfEditorState.originalMf.lines[idx];
+  if (orig) {
+    const changed = (orig[field] ?? null) !== (line[field] ?? null);
     inp.classList.toggle('dirty', changed);
+  } else {
+    inp.classList.add('dirty');
   }
 
   mfEditorState.dirty = isMfDirty();
   updateMfTotals();
   updateMfDirtyState();
+  scheduleAutosave();
+}
+
+function onMfDeleteRow(e) {
+  const btn = e.currentTarget;
+  const idx = parseInt(btn.dataset.lineIndex, 10);
+  if (Number.isNaN(idx)) return;
+  const line = mfEditorState.parsedMf.lines[idx];
+  const desc = line?.description ? line.description.slice(0, 50) : (line?.ama_code || 'raden');
+  if (!confirm(`Ta bort "${desc}"?`)) return;
+  mfEditorState.parsedMf.lines.splice(idx, 1);
+  renderMfEditorRows();
+  mfEditorState.dirty = true;
+  updateMfTotals();
+  updateMfDirtyState();
+  scheduleAutosave();
+}
+
+function onMfAddRow() {
+  if (!mfEditorState.parsedMf) return;
+  if (!Array.isArray(mfEditorState.parsedMf.lines)) {
+    mfEditorState.parsedMf.lines = [];
+  }
+  mfEditorState.parsedMf.lines.push({
+    ama_code: '',
+    description: '',
+    unit: 'st',
+    quantity: 1,
+    unit_price: null,
+    total_amount: null,
+    is_lump_sum: false,
+    _new: true,
+  });
+  renderMfEditorRows();
+  mfEditorState.dirty = true;
+  updateMfTotals();
+  updateMfDirtyState();
+  scheduleAutosave();
+
+  // Fokusera på AMA-kod-fältet på nya raden
+  setTimeout(() => {
+    const newIdx = mfEditorState.parsedMf.lines.length - 1;
+    const inp = document.querySelector(`.mf-cell-input[data-field="ama_code"][data-line-index="${newIdx}"]`);
+    if (inp) {
+      inp.focus();
+      inp.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, 30);
 }
 
 function isMfDirty() {
@@ -1342,7 +1465,13 @@ function isMfDirty() {
   const orig = mfEditorState.originalMf?.lines || [];
   if (cur.length !== orig.length) return true;
   for (let i = 0; i < cur.length; i++) {
-    if ((cur[i].unit_price ?? null) !== (orig[i].unit_price ?? null)) return true;
+    const a = cur[i], b = orig[i];
+    if (!b) return true;
+    if ((a.ama_code ?? '') !== (b.ama_code ?? '')) return true;
+    if ((a.description ?? '') !== (b.description ?? '')) return true;
+    if ((a.unit ?? '') !== (b.unit ?? '')) return true;
+    if ((a.quantity ?? null) !== (b.quantity ?? null)) return true;
+    if ((a.unit_price ?? null) !== (b.unit_price ?? null)) return true;
   }
   return false;
 }
@@ -1383,6 +1512,8 @@ function bindMfEditorActions() {
   const saveBtn = document.getElementById('mfSaveBtn');
   const revertBtn = document.getElementById('mfRevertBtn');
   const excelBtn = document.getElementById('mfExcelBtn');
+  const csvBtn = document.getElementById('mfCsvBtn');
+  const addBtn = document.getElementById('mfAddRowBtn');
   if (saveBtn && !saveBtn._bound) {
     saveBtn.addEventListener('click', saveMfEditor);
     saveBtn._bound = true;
@@ -1396,6 +1527,153 @@ function bindMfEditorActions() {
       if (mfEditorState.caseId) downloadCaseMfExcel(mfEditorState.caseId);
     });
     excelBtn._bound = true;
+  }
+  if (csvBtn && !csvBtn._bound) {
+    csvBtn.addEventListener('click', () => {
+      if (mfEditorState.caseId) downloadCaseMfCsv(mfEditorState.caseId);
+    });
+    csvBtn._bound = true;
+  }
+  if (addBtn && !addBtn._bound) {
+    addBtn.addEventListener('click', onMfAddRow);
+    addBtn._bound = true;
+  }
+}
+
+// ---- Auto-save ---------------------------------------------------------
+
+let _autosaveTimer = null;
+
+function scheduleAutosave() {
+  if (_autosaveTimer) clearTimeout(_autosaveTimer);
+  showAutosaveStatus('Ej sparat', '');
+  _autosaveTimer = setTimeout(() => {
+    if (mfEditorState.dirty) performAutosave();
+  }, 1500);
+}
+
+async function performAutosave() {
+  if (!mfEditorState.caseId || !mfEditorState.parsedMf || !mfEditorState.dirty) return;
+  showAutosaveStatus('Sparar…', 'saving');
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(mfEditorState.caseId)}/mf`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parsed_mf: mfEditorState.parsedMf }),
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+    await res.json();
+    mfEditorState.originalMf = JSON.parse(JSON.stringify(mfEditorState.parsedMf));
+    mfEditorState.dirty = false;
+    document.querySelectorAll('.mf-cell-input.dirty').forEach((el) => el.classList.remove('dirty'));
+    document.querySelectorAll('.mf-amount.changed').forEach((el) => el.classList.remove('changed'));
+    document.querySelectorAll('.mf-row-new').forEach((el) => el.classList.remove('mf-row-new'));
+    updateMfDirtyState();
+    showAutosaveStatus('Sparat ✓', 'saved');
+  } catch (e) {
+    showAutosaveStatus(`Fel: ${e.message}`, 'error');
+  }
+}
+
+function showAutosaveStatus(msg, kind) {
+  const el = document.getElementById('mfAutosaveStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `mf-autosave-status muted small ${kind || ''}`;
+}
+
+function downloadCaseMfCsv(caseId) {
+  const url = `/api/cases/${encodeURIComponent(caseId)}/mf/csv`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// ---------- ÖPPNA BEFINTLIGT ANBUD I EDITORN ---------------------------
+
+async function loadCaseInEditor(caseId) {
+  switchAgentMode('chat');
+
+  const status = document.getElementById('agentStatus');
+  status.hidden = false;
+  status.className = 'status loading';
+  status.textContent = 'Laddar anbud …';
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}`);
+    if (!res.ok) throw new Error(res.status === 404 ? 'Anbudet hittades inte' : `HTTP ${res.status}`);
+    const c = await res.json();
+
+    const summary = c.summary || {};
+    const fakeAnalysis = {
+      summary: {
+        file_count: (c.files || []).length,
+        project_name: c.project_name,
+        has_mf: !!c.parsed_mf,
+        total_size_kb: 0,
+        ...summary,
+      },
+      files: c.files || [],
+      narrative: summary.agent_summary || '',
+      recommendations: [],
+      ue_suggestions: [],
+    };
+    const fakeSavedCase = {
+      id: c.id,
+      lessons: c.lessons || [],
+      required_docs: c.required_docs || [],
+      project_name: c.project_name,
+    };
+
+    lastAnalysis = fakeAnalysis;
+
+    showCaseBanner(fakeSavedCase, fakeAnalysis);
+
+    // Filer-panel
+    const filesPanel = document.getElementById('filesPanel');
+    const chipsEl = document.getElementById('fileChips');
+    const countEl = document.getElementById('filesPanelCount');
+    countEl.textContent = `${(c.files || []).length} filer`;
+    chipsEl.innerHTML = (c.files || []).map((f) => `
+      <span class="file-chip">
+        <span class="file-chip-type" data-type="${escapeHtml(f.type)}">${escapeHtml(typeShort(f.type))}</span>
+        <span class="file-chip-name" title="${escapeHtml(f.filename)}">${escapeHtml(f.filename)}</span>
+        <span class="file-chip-status">✓</span>
+      </span>
+    `).join('');
+    filesPanel.hidden = false;
+
+    // Agent-narrative om finns
+    const agentPanel = document.getElementById('agentPanel');
+    if (fakeAnalysis.narrative) {
+      document.getElementById('agentNarrative').innerHTML = renderMarkdownLight(fakeAnalysis.narrative);
+      document.getElementById('agentRecs').innerHTML = '';
+      const recsHead = document.querySelector('.agent-recs-head');
+      if (recsHead) recsHead.style.display = 'none';
+      agentPanel.hidden = false;
+    } else {
+      agentPanel.hidden = true;
+    }
+
+    status.hidden = true;
+
+    // Drafts + MF-editor
+    loadDraftPanel(c.id);
+    if (c.parsed_mf) {
+      loadMfEditor(c.id);
+    } else {
+      document.getElementById('mfEditorPanel').hidden = true;
+    }
+  } catch (e) {
+    status.className = 'status error';
+    status.textContent = `Fel: ${e.message}`;
   }
 }
 

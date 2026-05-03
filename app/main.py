@@ -717,6 +717,47 @@ async def api_case_mf_update(case_id: str, payload: dict = Body(...)) -> JSONRes
     })
 
 
+@app.get("/api/cases/{case_id}/mf/csv")
+async def api_case_mf_csv(case_id: str) -> Response:
+    """Returnera MF som semikolon-separerad CSV (öppnas direkt i Google Sheets)."""
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    parsed_mf = case.get("parsed_mf")
+    if not parsed_mf:
+        raise HTTPException(status_code=404, detail="Ingen mängdförteckning hittades i detta case")
+
+    import csv as _csv
+    import io as _io
+
+    buf = _io.StringIO()
+    buf.write("﻿")  # BOM så Excel/Sheets förstår UTF-8
+    writer = _csv.writer(buf, delimiter=";", quoting=_csv.QUOTE_MINIMAL)
+    writer.writerow(["AMA-kod", "Beskrivning", "Enhet", "Antal", "À-pris", "Belopp"])
+
+    for line in parsed_mf.get("lines", []):
+        writer.writerow([
+            line.get("ama_code") or "",
+            line.get("description") or "",
+            line.get("unit") or "",
+            "" if line.get("quantity") is None else line["quantity"],
+            "" if line.get("unit_price") is None else line["unit_price"],
+            "" if line.get("total_amount") is None else line["total_amount"],
+        ])
+
+    project_slug = (case.get("project_name") or "anbud").replace(" ", "_").replace(",", "").replace("/", "-")
+    filename = f"Lodet_MF_{project_slug}.csv"
+
+    return Response(
+        content=buf.getvalue().encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
 @app.get("/api/cases/{case_id}/mf/excel")
 async def api_case_mf_excel(case_id: str) -> Response:
     """Returnera ifylld mängdförteckning som Excel-mall."""
