@@ -12,6 +12,8 @@ from typing import AsyncIterator
 
 from anthropic import AsyncAnthropic, APIError, AuthenticationError
 
+from app import case_archive
+
 
 SYSTEM_PROMPT = """Du är Lodet-agenten — en domänexpert på svenska bygg- och anläggningsanbud.
 
@@ -69,14 +71,29 @@ def is_configured() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY"))
 
 
-def _system_with_context(context: dict | None) -> str:
-    if not context:
-        return SYSTEM_PROMPT
-    return (
-        SYSTEM_PROMPT
-        + "\n\n---\nKONTEXT — användaren har laddat upp ett paket med följande sammanfattning:\n"
-        + json.dumps(context, ensure_ascii=False, indent=2)
-    )
+def _system_with_context(context: dict | None, user_query: str = "") -> str:
+    parts = [SYSTEM_PROMPT]
+
+    # Hämta relevanta cases från arkivet baserat på frågan
+    try:
+        relevant_cases = case_archive.find_relevant(user_query, limit=3)
+    except Exception:
+        relevant_cases = []
+
+    if relevant_cases:
+        parts.append("\n---\nKUNSKAPSBAS — relevanta tidigare anbud från arkivet:")
+        for case in relevant_cases:
+            parts.append("")
+            parts.append(case_archive.case_summary_for_context(case))
+        parts.append("")
+        parts.append("Använd dessa lärdomar när det är relevant. Säg när du refererar till "
+                     "tidigare projekt och var tydlig med datum och dokumentnummer.")
+
+    if context:
+        parts.append("\n---\nAKTUELL UPPLADDNING — användaren har just laddat upp ett paket:")
+        parts.append(json.dumps(context, ensure_ascii=False, indent=2))
+
+    return "\n".join(parts)
 
 
 async def stream_chat(
@@ -91,7 +108,12 @@ async def stream_chat(
         return
 
     client = get_client()
-    system_text = _system_with_context(context)
+    last_user_query = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user_query = m.get("content") or ""
+            break
+    system_text = _system_with_context(context, user_query=last_user_query)
 
     try:
         async with client.messages.stream(

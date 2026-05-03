@@ -18,10 +18,13 @@ from app import __version__
 from app import afb_templates as afb
 from app import ama_catalog
 from app import agent as lodet_agent
+from app import case_archive
 from app import chat as lodet_chat
 from app import file_classifier
+from app import lesson_extractor
 from app import pdf_extractor
 from app import ue_emailer
+from app import zip_handler
 from app.excel_builder import build_workbook
 from app.parser import parse_csv_bytes
 
@@ -285,66 +288,184 @@ async def api_chat(payload: dict = Body(...)) -> StreamingResponse:
 
 # --- Agent / paketanalys --------------------------------------------------
 
+def _classify_one(filename: str, data: bytes) -> tuple[lodet_agent.FileInfo, dict | None]:
+    """Klassificera en enskild fil och returnera (FileInfo, ev. parsed_mf)."""
+    size_kb = max(1, len(data) // 1024)
+    content_text = ""
+    if filename.lower().endswith(".pdf"):
+        content_text = pdf_extractor.extract_first_page_text(data)
+
+    kind = file_classifier.classify(filename, data, content_text)
+
+    parsed_mf: dict | None = None
+    if kind.type == "mf" and filename.lower().endswith(".csv"):
+        try:
+            doc = parse_csv_bytes(data)
+            parsed_mf = doc.to_dict()
+        except Exception:
+            pass
+
+    meta_extra: dict = {}
+    if content_text:
+        meta_extra = pdf_extractor.sniff_metadata_from_text(content_text)
+    if filename.lower().endswith(".pdf"):
+        pdf_meta = pdf_extractor.extract_metadata(data)
+        meta_extra.update({"page_count": pdf_meta.get("page_count")})
+
+    info = lodet_agent.FileInfo(
+        filename=filename,
+        type=kind.type,
+        label=kind.label,
+        confidence=kind.confidence,
+        size_kb=size_kb,
+        project_id=kind.project_id or file_classifier.extract_project_id(filename),
+        discipline=kind.discipline,
+        metadata=meta_extra or None,
+    )
+    return info, parsed_mf
+
+
+async def _analyze_filebatch(
+    filename_data_pairs: list[tuple[str, bytes]],
+    source: str,
+    source_name: str,
+    save_to_archive: bool = True,
+) -> dict:
+    """
+    Klassificera en samling filer (filnamn + bytes), kör agentanalys,
+    extrahera lärdomar med Claude och spara till arkiv.
+    """
+    file_infos: list[lodet_agent.FileInfo] = []
+    parsed_mf: dict | None = None
+
+    for fname, data in filename_data_pairs:
+        info, mf = _classify_one(fname, data)
+        file_infos.append(info)
+        if mf and parsed_mf is None:
+            parsed_mf = mf
+
+    analysis = lodet_agent.analyze_package(file_infos, parsed_mf)
+
+    saved_case = None
+    if save_to_archive:
+        files_dict = analysis["files"]
+        try:
+            extracted = await lesson_extractor.extract_lessons(
+                package_summary=analysis["summary"],
+                parsed_mf=parsed_mf,
+                files=files_dict,
+            )
+            lessons = extracted.get("lessons") or []
+            if extracted.get("summary"):
+                analysis["summary"]["agent_summary"] = extracted["summary"]
+            if extracted.get("tags"):
+                analysis["summary"]["tags"] = extracted["tags"]
+        except Exception:
+            lessons = []
+
+        try:
+            case = case_archive.save_case(
+                source=source,
+                source_name=source_name,
+                summary=analysis["summary"],
+                files=files_dict,
+                parsed_mf=parsed_mf,
+                lessons=lessons,
+            )
+            saved_case = {"id": case.id, "lessons": case.lessons}
+        except Exception:
+            saved_case = None
+
+    return {
+        "analysis": analysis,
+        "parsed_mf": parsed_mf,
+        "saved_case": saved_case,
+    }
+
+
 @app.post("/api/package/analyze")
 async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONResponse:
     """
-    Tar emot ett helt anbudspaket (många filer på en gång), klassificerar
-    varje fil och returnerar agentens analys + rekommendationer.
+    Tar emot ett helt anbudspaket — vanliga filer eller en eller flera ZIP-filer.
 
-    Om en CSV-fil hittas parsas den som mängdförteckning.
+    Om en ZIP innehåller flera toppmappar tolkas varje toppmapp som ett separat
+    anbudspaket. Resultatet sparas till case-arkivet på Volume.
     """
     if not files:
         raise HTTPException(status_code=400, detail="Inga filer mottagna")
 
-    file_infos: list[lodet_agent.FileInfo] = []
-    parsed_mf: dict | None = None
+    plain_files: list[tuple[str, bytes]] = []
+    zip_groups: list[tuple[str, list[tuple[str, bytes]]]] = []
 
     for f in files:
         if not f.filename:
             continue
         data = await f.read()
-        size_kb = max(1, len(data) // 1024)
-
-        content_text = ""
-        if f.filename.lower().endswith(".pdf"):
-            content_text = pdf_extractor.extract_first_page_text(data)
-
-        kind = file_classifier.classify(f.filename, data, content_text)
-
-        # Försök parsa mängdförteckning om CSV
-        if kind.type == "mf" and f.filename.lower().endswith(".csv") and parsed_mf is None:
+        if zip_handler.is_zip_filename(f.filename):
             try:
-                doc = parse_csv_bytes(data)
-                parsed_mf = doc.to_dict()
-            except Exception:
-                pass
+                extracted = zip_handler.extract_zip(data)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            grouped = zip_handler.group_by_folder(extracted)
+            zip_base = f.filename.rsplit(".", 1)[0]
+            for folder, fs in grouped.items():
+                pairs = [(x.filename, x.data) for x in fs]
+                source_name = f"{zip_base}/{folder}" if folder != "(rotmapp)" else zip_base
+                zip_groups.append((source_name, pairs))
+        else:
+            plain_files.append((f.filename, data))
 
-        # Plocka ut metadata om PDF
-        meta_extra: dict = {}
-        if content_text:
-            meta_extra = pdf_extractor.sniff_metadata_from_text(content_text)
-        if f.filename.lower().endswith(".pdf"):
-            pdf_meta = pdf_extractor.extract_metadata(data)
-            meta_extra.update({"page_count": pdf_meta.get("page_count")})
+    results: list[dict] = []
 
-        file_infos.append(
-            lodet_agent.FileInfo(
-                filename=f.filename,
-                type=kind.type,
-                label=kind.label,
-                confidence=kind.confidence,
-                size_kb=size_kb,
-                project_id=kind.project_id or file_classifier.extract_project_id(f.filename),
-                discipline=kind.discipline,
-                metadata=meta_extra or None,
-            )
+    # Plain (lösa filer + ev. mapp via webkitdirectory) → ETT paket
+    if plain_files:
+        source_name = "uppladdat-paket"
+        result = await _analyze_filebatch(
+            plain_files,
+            source="folder" if len(plain_files) > 1 else "single",
+            source_name=source_name,
         )
+        results.append(result)
 
-    analysis = lodet_agent.analyze_package(file_infos, parsed_mf)
+    # En analys per ZIP-mapp
+    for source_name, pairs in zip_groups:
+        result = await _analyze_filebatch(
+            pairs,
+            source="zip",
+            source_name=source_name,
+        )
+        results.append(result)
+
+    if len(results) == 1:
+        return JSONResponse(results[0])
+
     return JSONResponse({
-        "analysis": analysis,
-        "parsed_mf": parsed_mf,
+        "multi": True,
+        "case_count": len(results),
+        "results": results,
     })
+
+
+# --- Kunskapsbas (sparade cases) ------------------------------------------
+
+@app.get("/api/cases")
+async def api_cases_list() -> JSONResponse:
+    return JSONResponse({"cases": case_archive.list_cases_summary()})
+
+
+@app.get("/api/cases/{case_id}")
+async def api_case_get(case_id: str) -> JSONResponse:
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+    return JSONResponse(case)
+
+
+@app.delete("/api/cases/{case_id}")
+async def api_case_delete(case_id: str) -> JSONResponse:
+    if not case_archive.delete_case(case_id):
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+    return JSONResponse({"deleted": case_id})
 
 
 @app.post("/api/ue/email")

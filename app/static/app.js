@@ -12,6 +12,7 @@ const STORAGE_KEY = 'lodet:history';
 const ROUTES = {
   '#/start':               { view: 'start',         crumb: 'Start',                   handler: renderStart },
   '#/agent/ue':            { view: 'agent-ue',      crumb: 'Agent / UE-mejl',         handler: renderUePage },
+  '#/kunskapsbas':         { view: 'kunskapsbas',   crumb: 'Kunskapsbas',             handler: renderKunskapsbas },
   '#/dashboard':           { view: 'dashboard',     crumb: 'Översikt',                handler: renderDashboard },
   '#/upload':              { view: 'upload',        crumb: 'Anbud / nytt',            handler: renderUpload },
   '#/bids/active':         { view: 'bids-active',   crumb: 'Anbud / pågående',        handler: renderActiveBids },
@@ -574,14 +575,20 @@ let lastAnalysis = null;
 function bindStart() {
   const dz = document.getElementById('multiDropzone');
   const input = document.getElementById('multiFileInput');
+  const folderInput = document.getElementById('folderFileInput');
   const browse = document.getElementById('multiBrowseBtn');
+  const folderBrowse = document.getElementById('folderBrowseBtn');
   const demo = document.getElementById('demoPackageBtn');
 
-  dz.addEventListener('click', (e) => { if (e.target !== browse) input.click(); });
+  dz.addEventListener('click', (e) => {
+    if (e.target === browse || e.target === folderBrowse) return;
+    input.click();
+  });
   dz.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
   });
   browse.addEventListener('click', (e) => { e.stopPropagation(); input.click(); });
+  folderBrowse.addEventListener('click', (e) => { e.stopPropagation(); folderInput.click(); });
 
   ['dragenter', 'dragover'].forEach((ev) =>
     dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('dragover'); })
@@ -597,6 +604,12 @@ function bindStart() {
   input.addEventListener('change', (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length) handlePackageFiles(files);
+    e.target.value = '';
+  });
+  folderInput.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length) handlePackageFiles(files);
+    e.target.value = '';
   });
 
   demo.addEventListener('click', loadDemoPackage);
@@ -612,7 +625,11 @@ async function handlePackageFiles(files) {
   const status = document.getElementById('agentStatus');
   status.hidden = false;
   status.className = 'status loading';
-  status.textContent = `Skickar ${files.length} fil${files.length === 1 ? '' : 'er'} till agenten …`;
+  const zipCount = files.filter((f) => f.name.toLowerCase().endsWith('.zip')).length;
+  const desc = zipCount > 0
+    ? `${files.length} fil${files.length === 1 ? '' : 'er'} (${zipCount} ZIP)`
+    : `${files.length} fil${files.length === 1 ? '' : 'er'}`;
+  status.textContent = `Skickar ${desc} till agenten — extraherar lärdomar med Claude …`;
 
   const fd = new FormData();
   for (const f of files) fd.append('files', f);
@@ -624,14 +641,74 @@ async function handlePackageFiles(files) {
       throw new Error(err?.detail || `HTTP ${res.status}`);
     }
     const data = await res.json();
-    lastAnalysis = data.analysis;
-    renderAgentResult(data.analysis);
-    if (data.parsed_mf) saveMfToHistory(data.parsed_mf);
+
+    if (data.multi) {
+      renderMultiAgentResult(data);
+    } else {
+      lastAnalysis = data.analysis;
+      renderAgentResult(data.analysis, data.saved_case);
+      if (data.parsed_mf) saveMfToHistory(data.parsed_mf);
+    }
     status.hidden = true;
   } catch (e) {
     status.className = 'status error';
     status.textContent = `Fel: ${e.message}`;
   }
+}
+
+function renderMultiAgentResult(data) {
+  const filesPanel = document.getElementById('filesPanel');
+  const chipsEl = document.getElementById('fileChips');
+  const countEl = document.getElementById('filesPanelCount');
+
+  countEl.textContent = `${data.case_count} cases analyserade och sparade`;
+
+  let allFiles = [];
+  for (const r of data.results) {
+    allFiles = allFiles.concat(r.analysis.files || []);
+  }
+  chipsEl.innerHTML = allFiles.map((f) => `
+    <span class="file-chip">
+      <span class="file-chip-type" data-type="${escapeHtml(f.type)}">${escapeHtml(typeShort(f.type))}</span>
+      <span class="file-chip-name" title="${escapeHtml(f.filename)}">${escapeHtml(f.filename)}</span>
+      <span class="file-chip-status">✓</span>
+    </span>
+  `).join('');
+  filesPanel.hidden = false;
+
+  const agentPanel = document.getElementById('agentPanel');
+  const totalLessons = data.results.reduce((sum, r) => sum + (r.saved_case?.lessons?.length || 0), 0);
+  const narrative = `Jag har analyserat **${data.case_count} separata anbudspaket** från din uppladdning och sparat dem i kunskapsbasen. Totalt **${totalLessons} lärdomar** extraherade — agenten kommer nu plocka relevanta delar automatiskt när du chattar.`;
+  document.getElementById('agentNarrative').innerHTML = renderMarkdownLight(narrative);
+
+  const recsEl = document.getElementById('agentRecs');
+  recsEl.innerHTML = data.results.map((r, idx) => {
+    const project = r.analysis.summary.project_name || `Paket ${idx + 1}`;
+    const total = r.analysis.summary.total_amount_sek
+      ? `${new Intl.NumberFormat('sv-SE').format(r.analysis.summary.total_amount_sek)} kr`
+      : '—';
+    const lessonCount = r.saved_case?.lessons?.length || 0;
+    return `
+      <div class="agent-rec" data-priority="${idx + 1}">
+        <div class="agent-rec-priority">${idx + 1}</div>
+        <div class="agent-rec-body">
+          <p class="agent-rec-title">${escapeHtml(project)}</p>
+          <p class="agent-rec-text">${r.analysis.summary.file_count} filer · ${total} · ${lessonCount} lärdomar sparade</p>
+          ${r.saved_case ? `<button class="agent-rec-action" data-route="#/kunskapsbas">Visa i kunskapsbas →</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  recsEl.querySelectorAll('.agent-rec-action').forEach((btn) => {
+    btn.addEventListener('click', () => { location.hash = btn.dataset.route; });
+  });
+
+  // Sätt det första som lastAnalysis så chat-context fungerar
+  lastAnalysis = data.results[0]?.analysis || null;
+
+  agentPanel.hidden = false;
+  agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function loadDemoPackage() {
@@ -671,7 +748,7 @@ async function loadDemoPackage() {
   }
 }
 
-function renderAgentResult(analysis) {
+function renderAgentResult(analysis, savedCase) {
   // File chips
   const filesPanel = document.getElementById('filesPanel');
   const chipsEl = document.getElementById('fileChips');
@@ -706,6 +783,24 @@ function renderAgentResult(analysis) {
   recsEl.querySelectorAll('.agent-rec-action').forEach((btn) => {
     btn.addEventListener('click', () => { location.hash = btn.dataset.route; });
   });
+
+  // Lärdomar — visa kort om paketet sparats till arkivet
+  if (savedCase && savedCase.lessons && savedCase.lessons.length > 0) {
+    const lessonsHtml = `
+      <div class="agent-rec" data-priority="1" style="background: #FBF1D8; border-color: var(--ockra);">
+        <div class="agent-rec-priority" style="background: var(--ockra); color: var(--lodbla);">✦</div>
+        <div class="agent-rec-body">
+          <p class="agent-rec-title">${savedCase.lessons.length} lärdomar sparade till kunskapsbasen</p>
+          <p class="agent-rec-text">Agenten kommer nu använda dessa när du chattar om liknande projekt.</p>
+          <button class="agent-rec-action" data-route="#/kunskapsbas">Visa kunskapsbas →</button>
+        </div>
+      </div>
+    `;
+    recsEl.insertAdjacentHTML('afterbegin', lessonsHtml);
+    recsEl.querySelector('.agent-rec-action[data-route]').addEventListener('click', (e) => {
+      location.hash = e.target.dataset.route;
+    });
+  }
 
   agentPanel.hidden = false;
   agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -745,6 +840,147 @@ function saveMfToHistory(parsedMf) {
       summary: fakeSummary,
     });
   } catch (e) { console.warn(e); }
+}
+
+// ---------- KUNSKAPSBAS -------------------------------------------------
+
+async function renderKunskapsbas() {
+  const listEl = document.getElementById('kbCaseList');
+  const detailPanel = document.getElementById('kbDetailPanel');
+  detailPanel.hidden = true;
+
+  listEl.innerHTML = '<div class="empty-state"><p>Laddar …</p></div>';
+
+  try {
+    const res = await fetch('/api/cases');
+    const d = await res.json();
+    const cases = d.cases || [];
+
+    document.getElementById('kbStatCases').textContent = cases.length;
+    const allCodes = new Set();
+    let totalLessons = 0;
+    let totalValue = 0;
+    for (const c of cases) {
+      (c.ama_codes || []).forEach((code) => allCodes.add(code));
+      totalLessons += c.lesson_count || 0;
+      if (c.total_amount_sek) totalValue += c.total_amount_sek;
+    }
+    document.getElementById('kbStatAma').textContent = allCodes.size;
+    document.getElementById('kbStatLessons').textContent = totalLessons;
+    document.getElementById('kbStatValue').textContent = totalValue
+      ? `${fmtSEK.format(totalValue)} kr`
+      : '—';
+
+    if (cases.length === 0) {
+      listEl.innerHTML = '<div class="empty-state"><p>Tomt arkiv. Ladda upp ett paket på Start så börjar agenten lära sig.</p></div>';
+      return;
+    }
+
+    listEl.innerHTML = cases.map((c) => `
+      <div class="bid-row" data-case-id="${escapeHtml(c.id)}">
+        <div>
+          <div class="bid-name">${escapeHtml(c.project_name || c.source_name)}</div>
+          <div class="bid-meta">${escapeHtml(c.document_number || '—')} · ${c.file_count} filer · ${c.lesson_count} lärdomar · ${escapeHtml(c.source)}</div>
+        </div>
+        <div class="bid-amount">${c.total_amount_sek ? fmtSEK.format(c.total_amount_sek) + ' kr' : '—'}</div>
+        <div class="bid-date">${formatRelDate(c.created_at)}</div>
+        <div></div>
+      </div>
+    `).join('');
+
+    listEl.querySelectorAll('.bid-row').forEach((row) => {
+      row.addEventListener('click', () => loadCaseDetail(row.dataset.caseId));
+    });
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
+  }
+
+  document.getElementById('kbDetailClose').onclick = () => { detailPanel.hidden = true; };
+}
+
+async function loadCaseDetail(caseId) {
+  const detailPanel = document.getElementById('kbDetailPanel');
+  const titleEl = document.getElementById('kbDetailTitle');
+  const contentEl = document.getElementById('kbDetailContent');
+
+  contentEl.innerHTML = '<p class="muted">Laddar …</p>';
+  detailPanel.hidden = false;
+  detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}`);
+    const c = await res.json();
+
+    titleEl.textContent = c.project_name || c.source_name || c.id;
+
+    const meta = `
+      <div class="kb-meta-grid">
+        <div class="kb-meta-item">
+          <div class="kb-meta-label">Dokumentnr</div>
+          <div class="kb-meta-value">${escapeHtml(c.document_number || '—')}</div>
+        </div>
+        <div class="kb-meta-item">
+          <div class="kb-meta-label">Beställare</div>
+          <div class="kb-meta-value">${escapeHtml(c.customer || '—')}</div>
+        </div>
+        <div class="kb-meta-item">
+          <div class="kb-meta-label">Totalbelopp</div>
+          <div class="kb-meta-value">${c.total_amount_sek ? fmtSEK.format(c.total_amount_sek) + ' kr' : '—'}</div>
+        </div>
+        <div class="kb-meta-item">
+          <div class="kb-meta-label">Källa</div>
+          <div class="kb-meta-value">${escapeHtml(c.source)}: ${escapeHtml(c.source_name || '')}</div>
+        </div>
+        <div class="kb-meta-item">
+          <div class="kb-meta-label">Sparad</div>
+          <div class="kb-meta-value">${escapeHtml(c.created_at || '')}</div>
+        </div>
+        <div class="kb-meta-item">
+          <div class="kb-meta-label">Filer</div>
+          <div class="kb-meta-value">${(c.files || []).length}</div>
+        </div>
+      </div>
+    `;
+
+    const tags = c.summary?.tags || [];
+    const tagsHtml = tags.length > 0
+      ? `<div class="kb-tag-row">${tags.map((t) => `<span class="kb-tag">${escapeHtml(t)}</span>`).join('')}</div>`
+      : '';
+
+    const agentSummary = c.summary?.agent_summary
+      ? `<div class="kb-section"><h3>Agentens sammanfattning</h3><p>${escapeHtml(c.summary.agent_summary)}</p></div>`
+      : '';
+
+    const lessons = c.lessons || [];
+    const lessonsHtml = lessons.length > 0
+      ? `<div class="kb-section">
+          <h3>Lärdomar (${lessons.length})</h3>
+          ${lessons.map((l) => `
+            <div class="kb-lesson">
+              <span class="kb-lesson-type" data-type="${escapeHtml(l.type)}">${escapeHtml(l.type)}</span>
+              <span class="kb-lesson-code">${escapeHtml(l.ama_code || '—')}</span>
+              <span class="kb-lesson-note">${escapeHtml(l.note || '')}</span>
+            </div>
+          `).join('')}
+        </div>`
+      : '<div class="kb-section"><h3>Lärdomar</h3><p class="muted">Inga lärdomar extraherade — Claude API kanske inte var konfigurerad vid uppladdning.</p></div>';
+
+    const filesHtml = c.files && c.files.length > 0
+      ? `<div class="kb-section">
+          <h3>Filer i paketet</h3>
+          ${c.files.map((f) => `
+            <div style="display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--ljusgra);">
+              <span class="file-chip-type" data-type="${escapeHtml(f.type)}" style="display: inline-block; padding: 2px 7px; font-family: var(--font-mono); font-size: 0.72rem; border-radius: 10px;">${escapeHtml(typeShort(f.type))}</span>
+              <span style="font-size: 0.88rem;">${escapeHtml(f.filename)}</span>
+            </div>
+          `).join('')}
+        </div>`
+      : '';
+
+    contentEl.innerHTML = meta + tagsHtml + agentSummary + lessonsHtml + filesHtml;
+  } catch (e) {
+    contentEl.innerHTML = `<p>Fel: ${escapeHtml(e.message)}</p>`;
+  }
 }
 
 // ---------- UE-MEJL-VYN -------------------------------------------------

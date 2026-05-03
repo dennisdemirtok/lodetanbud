@@ -93,6 +93,11 @@
           </div>
         </div>
 
+        <a class="nav-item" data-route="#/kunskapsbas">
+          <span class="nav-icon">∞</span>
+          <span class="nav-label">Kunskapsbas</span>
+        </a>
+
         <a class="nav-item" data-route="#/historik">
           <span class="nav-icon">⌗</span>
           <span class="nav-label">Historik</span>
@@ -164,12 +169,18 @@
           </section>
 
           <div id="multiDropzone" class="dropzone dropzone-multi" tabindex="0" role="button" aria-label="Ladda upp förfrågningspaket">
-            <input type="file" id="multiFileInput" accept=".pdf,.csv,.xlsx,.xlsm,.xls" multiple hidden />
+            <input type="file" id="multiFileInput" accept=".pdf,.csv,.xlsx,.xlsm,.xls,.zip" multiple hidden />
+            <input type="file" id="folderFileInput" multiple webkitdirectory hidden />
             <div class="dropzone-content">
               <div class="dropzone-icon">↑</div>
-              <p class="dropzone-headline">Dra och släpp hela förfrågningspaketet</p>
-              <p class="dropzone-sub">PDF · CSV · Excel — flera filer samtidigt &nbsp;·&nbsp; <button type="button" class="link-btn" id="multiBrowseBtn">välj filer</button></p>
-              <p class="dropzone-hint">Mängdförteckning, AF-dokument, teknisk beskrivning, ritningar, kontrakt — släpp allt på en gång.</p>
+              <p class="dropzone-headline">Dra och släpp förfrågningspaket</p>
+              <p class="dropzone-sub">
+                PDF · CSV · Excel · ZIP &nbsp;·&nbsp;
+                <button type="button" class="link-btn" id="multiBrowseBtn">välj filer</button>
+                &nbsp;eller&nbsp;
+                <button type="button" class="link-btn" id="folderBrowseBtn">hela mappar</button>
+              </p>
+              <p class="dropzone-hint">Släpp en ZIP, en mapp eller flera filer på en gång — agenten lär sig av varje paket du laddar upp.</p>
             </div>
           </div>
 
@@ -494,6 +505,56 @@
               </div>
               <pre class="template-preview" id="tmplPreview">Fyll i fälten och klicka "Generera".</pre>
             </div>
+          </div>
+        </section>
+
+        <!-- =================== KUNSKAPSBAS =================== -->
+        <section class="view" data-view="kunskapsbas" hidden>
+          <div class="page-head">
+            <p class="eyebrow">Kunskapsbas</p>
+            <h1>Vad agenten har lärt sig</h1>
+            <p class="lede">Varje uppladdat paket sparas på Railway Volume och Claude extraherar återanvändbara lärdomar (prispunkter, UE-beslut, riskfaktorer). När du chattar väljer agenten relevanta cases automatiskt som kontext.</p>
+          </div>
+
+          <div class="card-grid stat-grid">
+            <div class="stat-card">
+              <span class="stat-icon" data-color="ockra">∞</span>
+              <span class="stat-label">Sparade cases</span>
+              <span class="stat-value" id="kbStatCases">—</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon" data-color="salvia">⊟</span>
+              <span class="stat-label">Unika AMA-koder</span>
+              <span class="stat-value" id="kbStatAma">—</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon" data-color="tegel">✦</span>
+              <span class="stat-label">Lärdomar totalt</span>
+              <span class="stat-value" id="kbStatLessons">—</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon" data-color="lodbla">∑</span>
+              <span class="stat-label">Sammanlagt värde</span>
+              <span class="stat-value" id="kbStatValue">—</span>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Cases i arkivet</h2>
+              <span class="muted small">klicka för detaljer</span>
+            </div>
+            <div id="kbCaseList" class="bid-list">
+              <div class="empty-state"><p>Laddar …</p></div>
+            </div>
+          </div>
+
+          <div class="panel" id="kbDetailPanel" hidden>
+            <div class="panel-head">
+              <h2 id="kbDetailTitle">—</h2>
+              <button class="btn btn-ghost btn-sm" id="kbDetailClose">Stäng</button>
+            </div>
+            <div id="kbDetailContent" class="kb-detail"></div>
           </div>
         </section>
 
