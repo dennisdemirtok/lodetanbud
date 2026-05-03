@@ -23,6 +23,8 @@ from app import chat as lodet_chat
 from app import file_classifier
 from app import lesson_extractor
 from app import pdf_extractor
+from app import pdf_renderer
+from app import requirement_extractor
 from app import ue_emailer
 from app import zip_handler
 from app.excel_builder import build_workbook
@@ -333,7 +335,7 @@ async def _analyze_filebatch(
 ) -> dict:
     """
     Klassificera en samling filer (filnamn + bytes), kör agentanalys,
-    extrahera lärdomar med Claude och spara till arkiv.
+    extrahera lärdomar och anbudskrav med Claude och spara till arkiv.
     """
     file_infos: list[lodet_agent.FileInfo] = []
     parsed_mf: dict | None = None
@@ -345,6 +347,17 @@ async def _analyze_filebatch(
             parsed_mf = mf
 
     analysis = lodet_agent.analyze_package(file_infos, parsed_mf)
+
+    # Plocka ut full text från AF-PDFen för krav-extraktion
+    af_text = ""
+    data_by_name = {fname: data for fname, data in filename_data_pairs}
+    for info in file_infos:
+        if info.type == "af" and info.filename.lower().endswith(".pdf"):
+            data = data_by_name.get(info.filename)
+            if data:
+                af_text = pdf_extractor.extract_all_text(data, max_chars=50_000)
+                if af_text:
+                    break
 
     saved_case = None
     if save_to_archive:
@@ -364,6 +377,11 @@ async def _analyze_filebatch(
             lessons = []
 
         try:
+            required_docs = await requirement_extractor.extract_required_docs(af_text)
+        except Exception:
+            required_docs = list(requirement_extractor.DEFAULT_REQUIRED_DOCS)
+
+        try:
             case = case_archive.save_case(
                 source=source,
                 source_name=source_name,
@@ -371,8 +389,13 @@ async def _analyze_filebatch(
                 files=files_dict,
                 parsed_mf=parsed_mf,
                 lessons=lessons,
+                required_docs=required_docs,
             )
-            saved_case = {"id": case.id, "lessons": case.lessons}
+            saved_case = {
+                "id": case.id,
+                "lessons": case.lessons,
+                "required_docs": case.required_docs,
+            }
         except Exception:
             saved_case = None
 
@@ -466,6 +489,200 @@ async def api_case_delete(case_id: str) -> JSONResponse:
     if not case_archive.delete_case(case_id):
         raise HTTPException(status_code=404, detail="Case hittades inte")
     return JSONResponse({"deleted": case_id})
+
+
+# --- Anbudsutkast (drafts per case) ---------------------------------------
+
+def _build_draft_text(case: dict, doc_id: str, doc_meta: dict) -> str:
+    """Generera utkast-text för ett krav i ett case."""
+    project_name = case.get("project_name") or "—"
+    document_number = case.get("document_number") or "—"
+    customer = case.get("customer") or "—"
+    total = case.get("total_amount_sek") or 0.0
+    company_name = case.get("summary", {}).get("company_name") or "Anbudsgivare AB"
+
+    if doc_id == "anbudssumma":
+        return afb.anbudssumma(
+            project_name=project_name,
+            document_number=document_number,
+            company_name=company_name,
+            total_amount=float(total),
+        )
+    if doc_id == "ue-lista":
+        return afb.ue_lista(project_name=project_name, company_name=company_name)
+    if doc_id == "sekretess":
+        return afb.sekretessbegaran(
+            project_name=project_name,
+            document_number=document_number,
+            company_name=company_name,
+        )
+    if doc_id == "missiv":
+        return afb.missiv(
+            project_name=project_name,
+            document_number=document_number,
+            company_name=company_name,
+            customer_name=customer,
+        )
+
+    # Okänt krav — generisk platsmall
+    title = doc_meta.get("title") or doc_id
+    description = doc_meta.get("description") or ""
+    code = doc_meta.get("code") or ""
+    code_line = f"{code}  " if code else ""
+
+    return f"""{code_line}{title.upper()}
+
+Projekt:        {project_name}
+Dokumentnr:     {document_number}
+Anbudsgivare:   {company_name}
+
+{description}
+
+[Fyll i innehållet enligt förfrågningsunderlagets krav.]
+
+
+Datum:          {datetime.now().strftime('%Y-%m-%d')}
+
+Underskrift:    ________________________________________
+"""
+
+
+@app.get("/api/cases/{case_id}/drafts")
+async def api_case_drafts(case_id: str) -> JSONResponse:
+    """Lista required_docs + status (genererat/redigerat) för ett case."""
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    drafts = case.get("drafts") or {}
+    required = case.get("required_docs") or []
+
+    items = []
+    for doc in required:
+        d = drafts.get(doc["id"])
+        items.append({
+            **doc,
+            "is_known_template": requirement_extractor.is_known_template(doc["id"]),
+            "is_mf": requirement_extractor.is_mf(doc["id"]),
+            "status": "edited" if (d and d.get("edited_at")) else ("generated" if d else "pending"),
+            "generated_at": d.get("generated_at") if d else None,
+            "edited_at": d.get("edited_at") if d else None,
+            "preview": (d.get("text") or "")[:160] if d else "",
+        })
+
+    return JSONResponse({
+        "case_id": case_id,
+        "project_name": case.get("project_name"),
+        "required_docs": items,
+        "has_mf": bool(case.get("parsed_mf")),
+    })
+
+
+@app.post("/api/cases/{case_id}/draft/{doc_id}")
+async def api_case_draft_generate(case_id: str, doc_id: str) -> JSONResponse:
+    """Generera (eller återgenerera) utkast för ett krav i ett case."""
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    if doc_id == "mf":
+        raise HTTPException(status_code=400, detail="MF hämtas som Excel via /api/cases/{id}/mf/excel")
+
+    required = case.get("required_docs") or []
+    doc_meta = next((d for d in required if d.get("id") == doc_id), None)
+    if doc_meta is None:
+        # Tillåt generering även för okända id om de skickas — använd doc_id som titel
+        doc_meta = {"id": doc_id, "title": doc_id, "description": "", "code": ""}
+
+    text = _build_draft_text(case, doc_id, doc_meta)
+    case_archive.update_draft(case_id, doc_id, text, edited=False)
+
+    return JSONResponse({
+        "case_id": case_id,
+        "doc_id": doc_id,
+        "text": text,
+        "status": "generated",
+    })
+
+
+@app.put("/api/cases/{case_id}/draft/{doc_id}")
+async def api_case_draft_update(case_id: str, doc_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Spara redigerad utkast-text."""
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text saknas")
+
+    case_archive.update_draft(case_id, doc_id, text, edited=True)
+    return JSONResponse({"case_id": case_id, "doc_id": doc_id, "status": "edited"})
+
+
+@app.get("/api/cases/{case_id}/draft/{doc_id}/pdf")
+async def api_case_draft_pdf(case_id: str, doc_id: str) -> Response:
+    """Returnera utkastet som PDF. Genererar text on-demand om inget sparat utkast finns."""
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    draft = (case.get("drafts") or {}).get(doc_id)
+    text = draft.get("text") if draft else None
+
+    if not text:
+        required = case.get("required_docs") or []
+        doc_meta = next((d for d in required if d.get("id") == doc_id), None) or {
+            "id": doc_id, "title": doc_id, "description": "", "code": "",
+        }
+        text = _build_draft_text(case, doc_id, doc_meta)
+        case_archive.update_draft(case_id, doc_id, text, edited=False)
+
+    required = case.get("required_docs") or []
+    doc_meta = next((d for d in required if d.get("id") == doc_id), {})
+    title = doc_meta.get("title") or doc_id
+    project = case.get("project_name") or "—"
+
+    pdf_bytes = pdf_renderer.text_to_pdf(
+        text=text,
+        title=f"{title} — {project}",
+        subtitle=case.get("document_number") or "",
+    )
+
+    project_slug = (case.get("project_name") or "anbud").replace(" ", "_").replace(",", "").replace("/", "-")
+    filename = f"Lodet_{doc_id}_{project_slug}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@app.get("/api/cases/{case_id}/mf/excel")
+async def api_case_mf_excel(case_id: str) -> Response:
+    """Returnera ifylld mängdförteckning som Excel-mall."""
+    case = case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    parsed_mf = case.get("parsed_mf")
+    if not parsed_mf:
+        raise HTTPException(status_code=404, detail="Ingen mängdförteckning hittades i detta case")
+
+    xlsx = build_workbook(parsed_mf, generated_at=_local_timestamp())
+    project_slug = (case.get("project_name") or "anbud").replace(" ", "_").replace(",", "").replace("/", "-")
+    filename = f"Lodet_MF_{project_slug}.xlsx"
+
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @app.post("/api/ue/email")

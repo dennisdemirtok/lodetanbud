@@ -54,11 +54,17 @@ class Case:
     customer: str | None = None
     total_amount_sek: float | None = None
     ama_codes: list[str] = None  # type: ignore
+    required_docs: list[dict] = None  # type: ignore  # krav extraherade från AF
+    drafts: dict = None  # type: ignore               # doc_id -> {text, generated_at, edited_at}
 
     def to_dict(self) -> dict:
         d = asdict(self)
         if d["ama_codes"] is None:
             d["ama_codes"] = []
+        if d["required_docs"] is None:
+            d["required_docs"] = []
+        if d["drafts"] is None:
+            d["drafts"] = {}
         return d
 
 
@@ -69,6 +75,7 @@ def save_case(
     files: list[dict],
     parsed_mf: dict | None = None,
     lessons: list[dict] | None = None,
+    required_docs: list[dict] | None = None,
 ) -> Case:
     """Skriv ett case till disk och returnera det."""
     _ensure_dirs()
@@ -105,6 +112,8 @@ def save_case(
         customer=summary.get("customer"),
         total_amount_sek=total,
         ama_codes=ama_codes,
+        required_docs=required_docs or [],
+        drafts={},
     )
 
     path = _CASES_DIR / f"{cid}.json"
@@ -129,6 +138,8 @@ def list_cases_summary() -> list[dict]:
     full = list_cases()
     out = []
     for c in full:
+        required = c.get("required_docs") or []
+        drafts = c.get("drafts") or {}
         out.append({
             "id": c["id"],
             "created_at": c["created_at"],
@@ -141,6 +152,8 @@ def list_cases_summary() -> list[dict]:
             "ama_codes": c.get("ama_codes") or [],
             "lesson_count": len(c.get("lessons") or []),
             "file_count": len(c.get("files") or []),
+            "required_count": len(required),
+            "draft_count": len(drafts),
         })
     return out
 
@@ -172,6 +185,44 @@ def update_lessons(case_id: str, lessons: list[dict]) -> bool:
     path = _CASES_DIR / f"{case_id}.json"
     path.write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
     return True
+
+
+def update_required_docs(case_id: str, required_docs: list[dict]) -> bool:
+    _ensure_dirs()
+    case = get_case(case_id)
+    if case is None:
+        return False
+    case["required_docs"] = required_docs
+    path = _CASES_DIR / f"{case_id}.json"
+    path.write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
+def update_draft(case_id: str, doc_id: str, text: str, edited: bool = False) -> bool:
+    """Spara ett genererat eller redigerat utkast för ett krav."""
+    _ensure_dirs()
+    case = get_case(case_id)
+    if case is None:
+        return False
+    drafts = case.get("drafts") or {}
+    existing = drafts.get(doc_id) or {}
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    drafts[doc_id] = {
+        "text": text,
+        "generated_at": existing.get("generated_at") or now,
+        "edited_at": now if edited else existing.get("edited_at"),
+    }
+    case["drafts"] = drafts
+    path = _CASES_DIR / f"{case_id}.json"
+    path.write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
+def get_draft(case_id: str, doc_id: str) -> dict | None:
+    case = get_case(case_id)
+    if case is None:
+        return None
+    return (case.get("drafts") or {}).get(doc_id)
 
 
 # ---- Sökning för chat-kontext --------------------------------------------

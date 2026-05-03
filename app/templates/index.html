@@ -330,6 +330,14 @@
                 <div id="agentRecs" class="agent-recs"></div>
               </div>
 
+              <div id="draftPanel" class="panel draft-panel" hidden>
+                <div class="panel-head">
+                  <h2>Anbudsutkast</h2>
+                  <span class="muted small" id="draftPanelMeta"></span>
+                </div>
+                <div id="draftList" class="draft-list"></div>
+              </div>
+
               <form class="chat-input chat-input-floating" id="chatFormBottom" autocomplete="off">
                 <input type="text" id="chatInputBottom" placeholder="Skriv en fråga…" maxlength="2000" />
                 <div class="chat-input-actions">
@@ -695,6 +703,30 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- ======================= DRAFT EDITOR MODAL ======================= -->
+  <div class="modal-overlay" id="draftModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="draftModalTitle">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow" id="draftModalCode">—</p>
+          <h2 id="draftModalTitle">—</h2>
+        </div>
+        <button class="modal-close" id="draftModalClose" aria-label="Stäng">✕</button>
+      </div>
+      <div class="modal-body">
+        <textarea class="modal-textarea" id="draftModalText" spellcheck="false"></textarea>
+      </div>
+      <div class="modal-foot">
+        <span class="muted small" id="draftModalStatus"></span>
+        <div class="modal-foot-actions">
+          <button class="btn btn-ghost btn-sm" id="draftModalRegenerate">Generera om</button>
+          <button class="btn btn-ghost btn-sm" id="draftModalPdf">Hämta PDF</button>
+          <button class="btn btn-primary btn-sm" id="draftModalSave">Spara</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="/static/app.js" defer></script>

@@ -79,6 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindStart();
   bindUeForm();
   bindChat();
+  bindDraftModal();
   if (!location.hash) location.hash = '#/start';
   navigate();
   renderRecentChats();
@@ -674,6 +675,8 @@ function switchAgentMode(mode) {
     document.getElementById('agentPanel').hidden = true;
     document.getElementById('filesPanel').hidden = true;
     document.getElementById('agentStatus').hidden = true;
+    const dp = document.getElementById('draftPanel');
+    if (dp) dp.hidden = true;
   }
 }
 
@@ -764,6 +767,14 @@ function renderMultiAgentResult(data) {
 
   agentPanel.hidden = false;
   agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Anbudsutkast — visa drafts för första casen i multi-resultatet
+  const firstCaseId = data.results[0]?.saved_case?.id;
+  if (firstCaseId) {
+    loadDraftPanel(firstCaseId);
+  } else {
+    document.getElementById('draftPanel').hidden = true;
+  }
 }
 
 async function loadDemoPackage() {
@@ -853,6 +864,248 @@ function renderAgentResult(analysis, savedCase) {
 
   agentPanel.hidden = false;
   agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Anbudsutkast-panel: ladda required_docs för casen
+  if (savedCase && savedCase.id) {
+    loadDraftPanel(savedCase.id);
+  } else {
+    document.getElementById('draftPanel').hidden = true;
+  }
+}
+
+// ---------- ANBUDSUTKAST (drafts per case) ------------------------------
+
+let currentDraftCaseId = null;
+let currentDraftDocId = null;
+let currentDraftMeta = null;
+
+async function loadDraftPanel(caseId) {
+  const panel = document.getElementById('draftPanel');
+  const list = document.getElementById('draftList');
+  const meta = document.getElementById('draftPanelMeta');
+
+  if (!caseId) {
+    panel.hidden = true;
+    return;
+  }
+
+  currentDraftCaseId = caseId;
+  list.innerHTML = '<div class="empty-state"><p>Laddar krav…</p></div>';
+  panel.hidden = false;
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/drafts`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    const docs = d.required_docs || [];
+    const done = docs.filter((x) => x.status !== 'pending').length;
+    meta.textContent = `${done} / ${docs.length} klara · ${escapeHtml(d.project_name || '—')}`;
+
+    if (docs.length === 0) {
+      list.innerHTML = '<div class="empty-state"><p>Inga krav extraherade. Återgenerera analys eller redigera manuellt.</p></div>';
+      return;
+    }
+
+    list.innerHTML = docs.map((doc) => renderDraftItem(doc, caseId, d.has_mf)).join('');
+    bindDraftActions(caseId);
+  } catch (e) {
+    list.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+function renderDraftItem(doc, caseId, hasMf) {
+  const isMf = doc.is_mf;
+  const code = doc.code || '';
+  const requiredLabel = doc.required ? 'Obligatoriskt' : 'Valfritt';
+  const statusLabel = doc.status === 'edited' ? 'Redigerat' : (doc.status === 'generated' ? 'Genererat' : 'Ej skapat');
+  const editedTime = doc.edited_at ? formatRelDate(doc.edited_at) : (doc.generated_at ? formatRelDate(doc.generated_at) : '');
+
+  let actions = '';
+  if (isMf) {
+    if (hasMf) {
+      actions = `<button class="draft-action primary" data-action="mf-excel" data-doc-id="${escapeHtml(doc.id)}">Hämta Excel</button>`;
+    } else {
+      actions = `<button class="draft-action" disabled>Ingen MF i paketet</button>`;
+    }
+  } else {
+    actions = `
+      <button class="draft-action" data-action="edit" data-doc-id="${escapeHtml(doc.id)}">${doc.status === 'pending' ? 'Generera' : 'Redigera'}</button>
+      ${doc.status !== 'pending' ? `<button class="draft-action primary" data-action="pdf" data-doc-id="${escapeHtml(doc.id)}">Hämta PDF</button>` : ''}
+    `;
+  }
+
+  return `
+    <div class="draft-item" data-doc-id="${escapeHtml(doc.id)}">
+      <div>
+        <div class="draft-item-head">
+          ${code ? `<span class="draft-item-code">${escapeHtml(code)}</span>` : ''}
+          <span class="draft-item-title">${escapeHtml(doc.title)}</span>
+          <span class="draft-item-required" data-required="${doc.required}">${requiredLabel}</span>
+          <span class="draft-item-status" data-status="${doc.status}">${statusLabel}</span>
+        </div>
+        <p class="draft-item-desc">${escapeHtml(doc.description || '')}</p>
+        ${editedTime ? `<div class="draft-item-meta">${doc.status === 'edited' ? 'Redigerat' : 'Genererat'} ${escapeHtml(editedTime)}</div>` : ''}
+      </div>
+      <div class="draft-item-actions">${actions}</div>
+    </div>
+  `;
+}
+
+function bindDraftActions(caseId) {
+  document.querySelectorAll('#draftList [data-action]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      const action = btn.dataset.action;
+      const docId = btn.dataset.docId;
+      if (action === 'edit') {
+        await openDraftModal(caseId, docId);
+      } else if (action === 'pdf') {
+        downloadDraftPdf(caseId, docId);
+      } else if (action === 'mf-excel') {
+        downloadCaseMfExcel(caseId);
+      }
+    });
+  });
+}
+
+async function openDraftModal(caseId, docId) {
+  const modal = document.getElementById('draftModal');
+  const titleEl = document.getElementById('draftModalTitle');
+  const codeEl = document.getElementById('draftModalCode');
+  const textarea = document.getElementById('draftModalText');
+  const status = document.getElementById('draftModalStatus');
+
+  currentDraftCaseId = caseId;
+  currentDraftDocId = docId;
+  currentDraftMeta = null;
+
+  // Hitta doc-meta från listan
+  const item = document.querySelector(`#draftList [data-doc-id="${docId}"]`);
+  const titleText = item?.querySelector('.draft-item-title')?.textContent || docId;
+  const codeText = item?.querySelector('.draft-item-code')?.textContent || '';
+  titleEl.textContent = titleText;
+  codeEl.textContent = codeText || 'Mall';
+  textarea.value = '';
+  status.textContent = 'Hämtar utkast…';
+
+  modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+
+  try {
+    // Fråga backend efter befintligt utkast eller generera
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/draft/${encodeURIComponent(docId)}`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+    const d = await res.json();
+    textarea.value = d.text || '';
+    status.textContent = d.status === 'generated' ? 'Utkast genererat' : '';
+    setTimeout(() => textarea.focus(), 50);
+  } catch (e) {
+    status.textContent = `Fel: ${e.message}`;
+    status.classList.add('error');
+  }
+}
+
+function closeDraftModal() {
+  const modal = document.getElementById('draftModal');
+  modal.hidden = true;
+  document.body.style.overflow = '';
+  currentDraftDocId = null;
+}
+
+async function saveDraftFromModal() {
+  if (!currentDraftCaseId || !currentDraftDocId) return;
+  const textarea = document.getElementById('draftModalText');
+  const status = document.getElementById('draftModalStatus');
+  const text = textarea.value;
+
+  status.textContent = 'Sparar…';
+  status.classList.remove('error');
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(currentDraftCaseId)}/draft/${encodeURIComponent(currentDraftDocId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+    status.textContent = 'Sparat ✓';
+    // Uppdatera listan
+    loadDraftPanel(currentDraftCaseId);
+    setTimeout(() => closeDraftModal(), 600);
+  } catch (e) {
+    status.textContent = `Fel: ${e.message}`;
+    status.classList.add('error');
+  }
+}
+
+async function regenerateDraftFromModal() {
+  if (!currentDraftCaseId || !currentDraftDocId) return;
+  const textarea = document.getElementById('draftModalText');
+  const status = document.getElementById('draftModalStatus');
+  status.textContent = 'Genererar om…';
+  status.classList.remove('error');
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(currentDraftCaseId)}/draft/${encodeURIComponent(currentDraftDocId)}`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+    const d = await res.json();
+    textarea.value = d.text || '';
+    status.textContent = 'Genererat på nytt';
+  } catch (e) {
+    status.textContent = `Fel: ${e.message}`;
+    status.classList.add('error');
+  }
+}
+
+function downloadDraftPdf(caseId, docId) {
+  const url = `/api/cases/${encodeURIComponent(caseId)}/draft/${encodeURIComponent(docId)}/pdf`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function downloadCaseMfExcel(caseId) {
+  const url = `/api/cases/${encodeURIComponent(caseId)}/mf/excel`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function bindDraftModal() {
+  const modal = document.getElementById('draftModal');
+  if (!modal) return;
+  document.getElementById('draftModalClose').addEventListener('click', closeDraftModal);
+  document.getElementById('draftModalSave').addEventListener('click', saveDraftFromModal);
+  document.getElementById('draftModalRegenerate').addEventListener('click', regenerateDraftFromModal);
+  document.getElementById('draftModalPdf').addEventListener('click', () => {
+    if (currentDraftCaseId && currentDraftDocId) {
+      downloadDraftPdf(currentDraftCaseId, currentDraftDocId);
+    }
+  });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeDraftModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.hidden) closeDraftModal();
+  });
 }
 
 function typeShort(t) {
