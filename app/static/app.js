@@ -6,54 +6,62 @@ const fmtSEK = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 0 });
 const fmtNum = new Intl.NumberFormat('sv-SE');
 
 const STORAGE_KEY = 'lodet:history';
+const CHATS_KEY = 'lodet:chats';
 
 // ---------- ROUTING ------------------------------------------------------
 
 const ROUTES = {
-  '#/start':               { view: 'start',         crumb: 'Start',                   handler: renderStart },
-  '#/agent/ue':            { view: 'agent-ue',      crumb: 'Agent / UE-mejl',         handler: renderUePage },
-  '#/kunskapsbas':         { view: 'kunskapsbas',   crumb: 'Kunskapsbas',             handler: renderKunskapsbas },
-  '#/dashboard':           { view: 'dashboard',     crumb: 'Översikt',                handler: renderDashboard },
-  '#/upload':              { view: 'upload',        crumb: 'Anbud / nytt',            handler: renderUpload },
-  '#/bids/active':         { view: 'bids-active',   crumb: 'Anbud / pågående',        handler: renderActiveBids },
-  '#/bids/submitted':      { view: 'bids-submitted',crumb: 'Anbud / inlämnade',       handler: () => {} },
-  '#/bids/archive':        { view: 'bids-archive',  crumb: 'Anbud / arkiv',           handler: () => {} },
-  '#/docs/mf':             { view: 'docs-mf',       crumb: 'Dokument / MF',           handler: renderDocsMf },
-  '#/docs/afb':            { view: 'docs-afb',      crumb: 'Dokument / AF-bilagor',   handler: renderAfbList },
-  '#/docs/drawings':       { view: 'docs-drawings', crumb: 'Dokument / ritningar',    handler: () => {} },
-  '#/ama/anlaggning':      { view: 'ama',           crumb: 'AMA / Anläggning',        handler: () => renderAma('AMA_Anläggning', 'AMA Anläggning 23') },
-  '#/ama/hus':             { view: 'ama',           crumb: 'AMA / Hus',               handler: () => renderAmaPlaceholder('AMA Hus 21', 'Husbyggnadskoder läses in i nästa milstolpe.') },
-  '#/ama/el':              { view: 'ama',           crumb: 'AMA / El',                handler: () => renderAmaPlaceholder('AMA El 22', 'AMA El-koder läses in i nästa milstolpe.') },
-  '#/ama/af':              { view: 'ama',           crumb: 'AMA / AF',                handler: () => renderAma('AF_AMA', 'AF AMA 21') },
-  '#/mallar/anbudssumma':  { view: 'template',      crumb: 'Mallar / AFB.31 Anbudssumma',  handler: () => renderTemplate('anbudssumma') },
-  '#/mallar/ue-lista':     { view: 'template',      crumb: 'Mallar / AFB.32 UE-lista',     handler: () => renderTemplate('ue-lista') },
-  '#/mallar/sekretess':    { view: 'template',      crumb: 'Mallar / Sekretessbegäran',    handler: () => renderTemplate('sekretess') },
-  '#/mallar/missiv':       { view: 'template',      crumb: 'Mallar / Missiv',              handler: () => renderTemplate('missiv') },
-  '#/historik':            { view: 'historik',      crumb: 'Historik',                handler: renderHistory },
-  '#/inst/foretag':        { view: 'inst',          crumb: 'Inställningar / Företag', handler: () => renderInst('Företagsinfo', 'Lagras per tenant. Företagsnamn, org.nr, kontaktuppgifter, logotyp.') },
-  '#/inst/index':          { view: 'inst',          crumb: 'Inställningar / Index',   handler: () => renderInst('Indexserier', 'E84 per litt och KPI för indexjustering av historiska priser.') },
-  '#/inst/paslag':         { view: 'inst',          crumb: 'Inställningar / Påslag',  handler: () => renderInst('Påslag och marginaler', 'Standardpåslag per kategori + täckningsbidragsregler.') },
-  '#/inst/anvandare':      { view: 'inst',          crumb: 'Inställningar / Användare', handler: () => renderInst('Användare', 'Roller och behörigheter. Multi-user kommer med Supabase-integration.') },
+  '#/start':              { tab: 'agent',       view: 'start',         crumb: 'Start',                   handler: renderStart },
+  '#/agent/ue':           { tab: 'agent',       view: 'agent-ue',      crumb: 'Agent / UE-mejl',         handler: renderUePage },
+  '#/kunskapsbas':        { tab: 'kunskapsbas', view: 'kunskapsbas',   crumb: 'Kunskapsbas',             handler: renderKunskapsbas },
+  '#/dashboard':          { tab: 'anbud',       view: 'dashboard',     crumb: 'Översikt',                handler: renderDashboard },
+  '#/upload':             { tab: 'anbud',       view: 'upload',        crumb: 'Anbud / nytt',            handler: renderUpload },
+  '#/bids/active':        { tab: 'anbud',       view: 'bids-active',   crumb: 'Anbud / pågående',        handler: renderActiveBids },
+  '#/bids/submitted':     { tab: 'anbud',       view: 'bids-submitted',crumb: 'Anbud / inlämnade',       handler: () => {} },
+  '#/bids/archive':       { tab: 'anbud',       view: 'bids-archive',  crumb: 'Anbud / arkiv',           handler: () => {} },
+  '#/docs/mf':            { tab: 'anbud',       view: 'docs-mf',       crumb: 'Dokument / MF',           handler: renderDocsMf },
+  '#/docs/afb':           { tab: 'bibliotek',   view: 'docs-afb',      crumb: 'Mallar',                  handler: renderAfbList },
+  '#/docs/drawings':      { tab: 'anbud',       view: 'docs-drawings', crumb: 'Dokument / ritningar',    handler: () => {} },
+  '#/ama/anlaggning':     { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / Anläggning',        handler: () => renderAma('AMA_Anläggning', 'AMA Anläggning 23') },
+  '#/ama/hus':            { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / Hus',               handler: () => renderAmaPlaceholder('AMA Hus 21', 'Husbyggnadskoder läses in i nästa milstolpe.') },
+  '#/ama/el':             { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / El',                handler: () => renderAmaPlaceholder('AMA El 22', 'AMA El-koder läses in i nästa milstolpe.') },
+  '#/ama/af':             { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / AF',                handler: () => renderAma('AF_AMA', 'AF AMA 21') },
+  '#/mallar/anbudssumma': { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / AFB.31',         handler: () => renderTemplate('anbudssumma') },
+  '#/mallar/ue-lista':    { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / AFB.32',         handler: () => renderTemplate('ue-lista') },
+  '#/mallar/sekretess':   { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / Sekretess',      handler: () => renderTemplate('sekretess') },
+  '#/mallar/missiv':      { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / Missiv',         handler: () => renderTemplate('missiv') },
+  '#/historik':           { tab: 'anbud',       view: 'historik',      crumb: 'Historik',                handler: renderHistory },
+  '#/inst/foretag':       { tab: 'inst',        view: 'inst',          crumb: 'Inst / Företag',          handler: () => renderInst('Företagsinfo', 'Lagras per tenant. Företagsnamn, org.nr, kontaktuppgifter, logotyp.') },
+  '#/inst/index':         { tab: 'inst',        view: 'inst',          crumb: 'Inst / Index',            handler: () => renderInst('Indexserier', 'E84 per litt och KPI för indexjustering av historiska priser.') },
+  '#/inst/paslag':        { tab: 'inst',        view: 'inst',          crumb: 'Inst / Påslag',           handler: () => renderInst('Påslag och marginaler', 'Standardpåslag per kategori + täckningsbidragsregler.') },
+  '#/inst/anvandare':     { tab: 'inst',        view: 'inst',          crumb: 'Inst / Användare',        handler: () => renderInst('Användare', 'Roller och behörigheter. Multi-user kommer med Supabase-integration.') },
 };
 
 function navigate() {
-  const hash = location.hash || '#/dashboard';
-  const route = ROUTES[hash] || ROUTES['#/dashboard'];
+  const hash = location.hash || '#/start';
+  const route = ROUTES[hash] || ROUTES['#/start'];
 
+  // Visa rätt view
   document.querySelectorAll('.view').forEach((v) => v.hidden = true);
   const viewEl = document.querySelector(`[data-view="${route.view}"]`);
   if (viewEl) viewEl.hidden = false;
 
-  document.getElementById('breadcrumb').textContent = route.crumb;
+  // Aktivera rätt topbar-tab
+  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+  const activeTab = document.querySelector(`.tab[data-tab="${route.tab}"]`);
+  if (activeTab) activeTab.classList.add('active');
 
-  document.querySelectorAll('.nav-item, .nav-child').forEach((el) => el.classList.remove('active'));
-  const activeNav = document.querySelector(`[data-route="${hash}"]`);
-  if (activeNav) {
-    activeNav.classList.add('active');
-    const group = activeNav.closest('.nav-group');
-    if (group) group.classList.add('open');
-  }
+  // Visa rätt sidebar-section
+  document.querySelectorAll('.sidebar-section').forEach((s) => s.hidden = true);
+  const activeSidebar = document.querySelector(`.sidebar-section[data-sidebar="${route.tab}"]`);
+  if (activeSidebar) activeSidebar.hidden = false;
 
+  // Aktivera rätt sidebar-länk inom sidebar-sectionen
+  document.querySelectorAll('.sidebar-link').forEach((el) => el.classList.remove('active'));
+  const activeLink = document.querySelector(`.sidebar-link[data-route="${hash}"]`);
+  if (activeLink) activeLink.classList.add('active');
+
+  // Stäng mobil-sidebar
   document.querySelectorAll('.sidebar.open').forEach((s) => s.classList.remove('open'));
   window.scrollTo({ top: 0 });
 
@@ -65,7 +73,7 @@ window.addEventListener('hashchange', navigate);
 // ---------- INIT ---------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', () => {
-  bindSidebar();
+  bindShell();
   bindUpload();
   bindTemplateForm();
   bindStart();
@@ -73,24 +81,39 @@ document.addEventListener('DOMContentLoaded', () => {
   bindChat();
   if (!location.hash) location.hash = '#/start';
   navigate();
+  renderRecentChats();
 });
 
-function bindSidebar() {
-  document.querySelectorAll('[data-route]').forEach((el) => {
-    el.addEventListener('click', (e) => {
-      e.preventDefault();
-      location.hash = el.dataset.route;
-    });
+function bindShell() {
+  // Alla data-route-element navigerar
+  document.body.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-route]');
+    if (!el) return;
+    e.preventDefault();
+    location.hash = el.dataset.route;
   });
-  document.querySelectorAll('[data-group-toggle]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
+
+  // Hamburger för mobil-sidebar
+  const ham = document.getElementById('hamburger');
+  if (ham) {
+    ham.addEventListener('click', (e) => {
       e.stopPropagation();
-      btn.closest('.nav-group').classList.toggle('open');
+      document.getElementById('sidebar').classList.toggle('open');
     });
-  });
-  document.getElementById('hamburger').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('open');
-  });
+  }
+
+  // "Ny chat" — rensa historik, växla till empty-state
+  const newBtn = document.getElementById('newChatBtn');
+  if (newBtn) {
+    newBtn.addEventListener('click', () => {
+      currentChatId = null;
+      chatHistory.length = 0;
+      lastAnalysis = null;
+      switchAgentMode('empty');
+      location.hash = '#/start';
+      renderRecentChats();
+    });
+  }
 }
 
 // ---------- DASHBOARD ----------------------------------------------------
@@ -579,9 +602,10 @@ function bindStart() {
   const browse = document.getElementById('multiBrowseBtn');
   const folderBrowse = document.getElementById('folderBrowseBtn');
   const demo = document.getElementById('demoPackageBtn');
+  const heroAttachInput = document.getElementById('heroFileInput');
 
   dz.addEventListener('click', (e) => {
-    if (e.target === browse || e.target === folderBrowse) return;
+    if (e.target === browse || e.target === folderBrowse || e.target === demo) return;
     input.click();
   });
   dz.addEventListener('keydown', (e) => {
@@ -589,6 +613,7 @@ function bindStart() {
   });
   browse.addEventListener('click', (e) => { e.stopPropagation(); input.click(); });
   folderBrowse.addEventListener('click', (e) => { e.stopPropagation(); folderInput.click(); });
+  demo.addEventListener('click', (e) => { e.stopPropagation(); loadDemoPackage(); });
 
   ['dragenter', 'dragover'].forEach((ev) =>
     dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('dragover'); })
@@ -612,16 +637,50 @@ function bindStart() {
     e.target.value = '';
   });
 
-  demo.addEventListener('click', loadDemoPackage);
-
-  document.querySelectorAll('.quick-action[data-route]').forEach((b) => {
-    b.addEventListener('click', () => { location.hash = b.dataset.route; });
-  });
+  // Hero-input attach
+  if (heroAttachInput) {
+    heroAttachInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length) handlePackageFiles(files);
+      e.target.value = '';
+    });
+  }
 }
 
-function renderStart() { /* state already bound */ }
+function renderStart() {
+  // Om vi har chat-historik → chat-läge, annars empty
+  if (chatHistory.length > 0) {
+    switchAgentMode('chat');
+  } else {
+    switchAgentMode('empty');
+  }
+}
+
+function switchAgentMode(mode) {
+  const empty = document.getElementById('agentEmpty');
+  const chat = document.getElementById('agentChat');
+  if (!empty || !chat) return;
+  if (mode === 'chat') {
+    empty.hidden = true;
+    chat.hidden = false;
+    setTimeout(() => {
+      const inp = document.getElementById('chatInputBottom');
+      if (inp) inp.focus();
+    }, 50);
+  } else {
+    empty.hidden = false;
+    chat.hidden = true;
+    document.getElementById('chatMessages').innerHTML = '';
+    document.getElementById('agentPanel').hidden = true;
+    document.getElementById('filesPanel').hidden = true;
+    document.getElementById('agentStatus').hidden = true;
+  }
+}
 
 async function handlePackageFiles(files) {
+  // Växla till chat-läge så användaren ser fortskridandet
+  switchAgentMode('chat');
+
   const status = document.getElementById('agentStatus');
   status.hidden = false;
   status.className = 'status loading';
@@ -700,10 +759,6 @@ function renderMultiAgentResult(data) {
     `;
   }).join('');
 
-  recsEl.querySelectorAll('.agent-rec-action').forEach((btn) => {
-    btn.addEventListener('click', () => { location.hash = btn.dataset.route; });
-  });
-
   // Sätt det första som lastAnalysis så chat-context fungerar
   lastAnalysis = data.results[0]?.analysis || null;
 
@@ -712,7 +767,8 @@ function renderMultiAgentResult(data) {
 }
 
 async function loadDemoPackage() {
-  // Hämtar demo-CSV och kör den genom paket-endpoint som ett enskilt-fil-paket
+  switchAgentMode('chat');
+
   const status = document.getElementById('agentStatus');
   status.hidden = false;
   status.className = 'status loading';
@@ -780,10 +836,6 @@ function renderAgentResult(analysis, savedCase) {
     </div>
   `).join('');
 
-  recsEl.querySelectorAll('.agent-rec-action').forEach((btn) => {
-    btn.addEventListener('click', () => { location.hash = btn.dataset.route; });
-  });
-
   // Lärdomar — visa kort om paketet sparats till arkivet
   if (savedCase && savedCase.lessons && savedCase.lessons.length > 0) {
     const lessonsHtml = `
@@ -797,9 +849,6 @@ function renderAgentResult(analysis, savedCase) {
       </div>
     `;
     recsEl.insertAdjacentHTML('afterbegin', lessonsHtml);
-    recsEl.querySelector('.agent-rec-action[data-route]').addEventListener('click', (e) => {
-      location.hash = e.target.dataset.route;
-    });
   }
 
   agentPanel.hidden = false;
@@ -814,7 +863,6 @@ function typeShort(t) {
 }
 
 function renderMarkdownLight(text) {
-  // Mycket enkel markdown: **bold** och radbrytningar
   return escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n\n/g, '</p><p>')
@@ -824,7 +872,6 @@ function renderMarkdownLight(text) {
 }
 
 function saveMfToHistory(parsedMf) {
-  // Använd befintlig history-funktion som tar payload med summary
   try {
     const meta = parsedMf.metadata || {};
     const lines = parsedMf.lines || [];
@@ -1076,32 +1123,59 @@ function renderUeDrafts(drafts) {
 
 const chatHistory = [];
 let chatBusy = false;
+let currentChatId = null;
+let chatConfigured = true;
 
 function bindChat() {
-  const form = document.getElementById('chatForm');
-  const input = document.getElementById('chatInput');
-  const sendBtn = document.getElementById('chatSendBtn');
-  if (!form) return;
+  // Två formulär: hero (chatForm) och bottom (chatFormBottom). Båda postar samma chat.
+  const heroForm = document.getElementById('chatForm');
+  const bottomForm = document.getElementById('chatFormBottom');
 
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    if (chatBusy) return;
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = '';
-    sendChat(text);
-  });
+  if (heroForm) {
+    heroForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inp = document.getElementById('chatInput');
+      const text = inp.value.trim();
+      if (!text || chatBusy) return;
+      inp.value = '';
+      switchAgentMode('chat');
+      sendChat(text);
+    });
+  }
 
+  if (bottomForm) {
+    bottomForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inp = document.getElementById('chatInputBottom');
+      const text = inp.value.trim();
+      if (!text || chatBusy) return;
+      inp.value = '';
+      sendChat(text);
+    });
+  }
+
+  // Status-check för Claude-konfiguration
   fetch('/api/chat/status')
     .then((r) => r.json())
     .then((d) => {
-      if (!d.configured) {
+      chatConfigured = !!d.configured;
+      if (!chatConfigured) {
         const status = document.getElementById('chatStatus');
-        status.textContent = 'inte konfigurerad — ANTHROPIC_API_KEY saknas i Railway';
-        status.classList.add('error');
-        input.placeholder = 'Lägg till ANTHROPIC_API_KEY i Railway-variablerna för att aktivera';
-        input.disabled = true;
-        sendBtn.disabled = true;
+        if (status) {
+          status.textContent = 'inte konfigurerad — ANTHROPIC_API_KEY saknas i Railway';
+          status.classList.add('error');
+        }
+        ['chatInput', 'chatInputBottom'].forEach((id) => {
+          const inp = document.getElementById(id);
+          if (inp) {
+            inp.placeholder = 'Lägg till ANTHROPIC_API_KEY i Railway-variablerna för att aktivera';
+            inp.disabled = true;
+          }
+        });
+        ['chatSendBtn', 'chatSendBtnBottom'].forEach((id) => {
+          const b = document.getElementById(id);
+          if (b) b.disabled = true;
+        });
       }
     })
     .catch(() => {});
@@ -1116,14 +1190,23 @@ function appendChatMessage(role, text) {
   bubble.textContent = text;
   el.appendChild(bubble);
   wrap.appendChild(el);
-  wrap.scrollTop = wrap.scrollHeight;
+  scrollChatToBottom();
   return el;
+}
+
+function scrollChatToBottom() {
+  // Scrollar hela window eftersom chat-stream nu lever inline i content
+  setTimeout(() => {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  }, 30);
 }
 
 async function sendChat(userText) {
   chatBusy = true;
-  const sendBtn = document.getElementById('chatSendBtn');
-  sendBtn.disabled = true;
+  ['chatSendBtn', 'chatSendBtnBottom'].forEach((id) => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = true;
+  });
 
   appendChatMessage('user', userText);
   chatHistory.push({ role: 'user', content: userText });
@@ -1174,7 +1257,7 @@ async function sendChat(userText) {
         if (data.type === 'token') {
           full += data.text;
           bubble.textContent = full;
-          document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+          scrollChatToBottom();
         } else if (data.type === 'error') {
           throw new Error(data.message);
         } else if (data.type === 'done') {
@@ -1184,6 +1267,7 @@ async function sendChat(userText) {
     }
 
     chatHistory.push({ role: 'assistant', content: full });
+    persistCurrentChat();
   } catch (e) {
     bubble.textContent = `⚠ ${e.message || 'Något gick fel'}`;
     bubble.style.color = 'var(--tegel)';
@@ -1191,9 +1275,80 @@ async function sendChat(userText) {
   } finally {
     agentEl.classList.remove('thinking');
     chatBusy = false;
-    sendBtn.disabled = false;
-    document.getElementById('chatInput').focus();
+    if (chatConfigured) {
+      ['chatSendBtn', 'chatSendBtnBottom'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.disabled = false;
+      });
+    }
+    const bottomInp = document.getElementById('chatInputBottom');
+    if (bottomInp && !bottomInp.disabled) bottomInp.focus();
   }
+}
+
+// ---------- RECENT CHATS (sidebar) --------------------------------------
+
+function persistCurrentChat() {
+  if (chatHistory.length === 0) return;
+  try {
+    const list = JSON.parse(localStorage.getItem(CHATS_KEY) || '[]');
+    if (!currentChatId) {
+      currentChatId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+    const firstUser = chatHistory.find((m) => m.role === 'user');
+    const title = firstUser ? firstUser.content.slice(0, 60) : 'Ny chat';
+    const entry = {
+      id: currentChatId,
+      title,
+      messages: chatHistory.slice(),
+      updated_at: new Date().toISOString(),
+    };
+    const filtered = list.filter((c) => c.id !== currentChatId);
+    filtered.unshift(entry);
+    localStorage.setItem(CHATS_KEY, JSON.stringify(filtered.slice(0, 30)));
+    renderRecentChats();
+  } catch (e) { console.warn(e); }
+}
+
+function loadRecentChats() {
+  try { return JSON.parse(localStorage.getItem(CHATS_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function renderRecentChats() {
+  const el = document.getElementById('recentChatsList');
+  if (!el) return;
+  const list = loadRecentChats();
+  if (list.length === 0) {
+    el.innerHTML = '<p class="sidebar-empty">Inga chattar ännu</p>';
+    return;
+  }
+  el.innerHTML = list.map((c) => `
+    <a class="sidebar-recent-item${c.id === currentChatId ? ' active' : ''}" data-chat-id="${escapeHtml(c.id)}" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</a>
+  `).join('');
+  el.querySelectorAll('[data-chat-id]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      restoreChat(a.dataset.chatId);
+    });
+  });
+}
+
+function restoreChat(id) {
+  const list = loadRecentChats();
+  const c = list.find((x) => x.id === id);
+  if (!c) return;
+  currentChatId = id;
+  chatHistory.length = 0;
+  c.messages.forEach((m) => chatHistory.push(m));
+  switchAgentMode('chat');
+  const wrap = document.getElementById('chatMessages');
+  wrap.innerHTML = '';
+  for (const m of chatHistory) {
+    appendChatMessage(m.role === 'assistant' ? 'agent' : 'user', m.content);
+  }
+  location.hash = '#/start';
+  renderRecentChats();
 }
 
 // ---------- HELPERS ------------------------------------------------------

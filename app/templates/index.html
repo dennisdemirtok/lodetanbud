@@ -7,584 +7,692 @@
   <meta name="description" content="Lodet hjälper svenska bygg- och anläggningsentreprenörer att lämna anbud snabbare och säkrare." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
 </head>
 <body>
   <div class="app-shell">
 
-    <!-- ======================= SIDEBAR ======================= -->
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-brand">
-        <span class="brand-mark">⊥</span>
-        <div class="brand-text">
-          <span class="brand-name">LODET</span>
-          <span class="brand-tag">anbud i lod</span>
-        </div>
+    <!-- ======================= TOPBAR (global tabs) ======================= -->
+    <header class="topbar" id="topbar">
+      <div class="topbar-brand">
+        <span class="brand-mark">L</span>
+        <span class="brand-name">Lodet</span>
       </div>
 
-      <button class="sidebar-cta" data-route="#/start">+ Nytt anbud</button>
-
-      <nav class="sidebar-nav">
-
-        <a class="nav-item" data-route="#/start">
-          <span class="nav-icon">✦</span>
-          <span class="nav-label">Start</span>
-        </a>
-
-        <a class="nav-item" data-route="#/dashboard">
-          <span class="nav-icon">▦</span>
-          <span class="nav-label">Översikt</span>
-        </a>
-
-        <div class="nav-group" data-group="anbud">
-          <button class="nav-toggle" data-group-toggle="anbud">
-            <span class="nav-icon">⊞</span>
-            <span class="nav-label">Anbud</span>
-            <span class="nav-chev">›</span>
-          </button>
-          <div class="nav-children">
-            <a class="nav-child" data-route="#/upload">Nytt anbud</a>
-            <a class="nav-child" data-route="#/bids/active">Pågående utkast</a>
-            <a class="nav-child" data-route="#/bids/submitted">Inlämnade</a>
-            <a class="nav-child" data-route="#/bids/archive">Vunna / förlorade</a>
-          </div>
-        </div>
-
-        <div class="nav-group" data-group="dokument">
-          <button class="nav-toggle" data-group-toggle="dokument">
-            <span class="nav-icon">▤</span>
-            <span class="nav-label">Dokument</span>
-            <span class="nav-chev">›</span>
-          </button>
-          <div class="nav-children">
-            <a class="nav-child" data-route="#/docs/mf">Mängdförteckningar</a>
-            <a class="nav-child" data-route="#/docs/afb">AF-bilagor</a>
-            <a class="nav-child" data-route="#/docs/drawings">Ritningar</a>
-          </div>
-        </div>
-
-        <div class="nav-group" data-group="ama">
-          <button class="nav-toggle" data-group-toggle="ama">
-            <span class="nav-icon">⊟</span>
-            <span class="nav-label">AMA-bibliotek</span>
-            <span class="nav-chev">›</span>
-          </button>
-          <div class="nav-children">
-            <a class="nav-child" data-route="#/ama/anlaggning">AMA Anläggning</a>
-            <a class="nav-child" data-route="#/ama/hus">AMA Hus</a>
-            <a class="nav-child" data-route="#/ama/el">AMA El</a>
-            <a class="nav-child" data-route="#/ama/af">AF AMA</a>
-          </div>
-        </div>
-
-        <div class="nav-group" data-group="mallar">
-          <button class="nav-toggle" data-group-toggle="mallar">
-            <span class="nav-icon">⊡</span>
-            <span class="nav-label">Mallar</span>
-            <span class="nav-chev">›</span>
-          </button>
-          <div class="nav-children">
-            <a class="nav-child" data-route="#/mallar/anbudssumma">AFB.31 Anbudssumma</a>
-            <a class="nav-child" data-route="#/mallar/ue-lista">AFB.32 UE-lista</a>
-            <a class="nav-child" data-route="#/mallar/sekretess">Sekretessbegäran</a>
-            <a class="nav-child" data-route="#/mallar/missiv">Missiv</a>
-          </div>
-        </div>
-
-        <a class="nav-item" data-route="#/kunskapsbas">
-          <span class="nav-icon">∞</span>
-          <span class="nav-label">Kunskapsbas</span>
-        </a>
-
-        <a class="nav-item" data-route="#/historik">
-          <span class="nav-icon">⌗</span>
-          <span class="nav-label">Historik</span>
-        </a>
-
-        <div class="nav-group" data-group="installningar">
-          <button class="nav-toggle" data-group-toggle="installningar">
-            <span class="nav-icon">⚙</span>
-            <span class="nav-label">Inställningar</span>
-            <span class="nav-chev">›</span>
-          </button>
-          <div class="nav-children">
-            <a class="nav-child" data-route="#/inst/foretag">Företagsinfo</a>
-            <a class="nav-child" data-route="#/inst/index">Indexserier (E84/KPI)</a>
-            <a class="nav-child" data-route="#/inst/paslag">Påslag och marginaler</a>
-            <a class="nav-child" data-route="#/inst/anvandare">Användare</a>
-          </div>
-        </div>
-
+      <nav class="topbar-tabs" id="topbarTabs">
+        <a class="tab" data-tab="agent" data-route="#/start">Agent</a>
+        <a class="tab" data-tab="anbud" data-route="#/dashboard">Anbud</a>
+        <a class="tab" data-tab="bibliotek" data-route="#/ama/anlaggning">Bibliotek</a>
+        <a class="tab" data-tab="kunskapsbas" data-route="#/kunskapsbas">Kunskapsbas</a>
+        <a class="tab" data-tab="inst" data-route="#/inst/foretag">Inställningar</a>
       </nav>
 
-      <div class="sidebar-footer">
-        <a href="https://github.com/dennisdemirtok/lodetanbud" target="_blank" rel="noopener" class="sidebar-link">GitHub ↗</a>
-        <span class="version">v{{ version }}</span>
-      </div>
-    </aside>
-
-    <!-- ======================= MAIN ========================== -->
-    <div class="main">
-      <header class="topbar">
+      <div class="topbar-end">
         <button class="hamburger" id="hamburger" aria-label="Visa meny">☰</button>
-        <div class="breadcrumb" id="breadcrumb">Översikt</div>
-        <div class="topbar-actions">
-          <span class="search-hint">Sök <kbd>⌘ K</kbd></span>
-        </div>
-      </header>
+      </div>
+    </header>
 
-      <main class="content" id="content">
+    <div class="app-body">
 
-        <!-- =================== START / AGENT =================== -->
-        <section class="view" data-view="start" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Lodet-agenten</p>
-            <h1>God morgon, vad ska vi göra?</h1>
-            <p class="lede">Släpp hela förfrågningspaketet — mängdförteckning, AF-dokument, teknisk beskrivning och ritningar — så går agenten igenom det och föreslår nästa steg.</p>
+      <!-- ======================= SIDEBAR (kontextuell) ======================= -->
+      <aside class="sidebar" id="sidebar">
+
+        <!-- AGENT-TAB -->
+        <div class="sidebar-section" data-sidebar="agent" hidden>
+          <button class="sidebar-cta" id="newChatBtn">
+            <span class="sidebar-cta-icon">+</span>
+            <span>Ny chat</span>
+          </button>
+
+          <div class="sidebar-divider"></div>
+          <p class="sidebar-label">Verktyg</p>
+          <a class="sidebar-link" data-route="#/start">
+            <span class="sidebar-link-icon">✦</span>
+            <span>Start</span>
+          </a>
+          <a class="sidebar-link" data-route="#/agent/ue">
+            <span class="sidebar-link-icon">✉</span>
+            <span>UE-mejl</span>
+          </a>
+          <a class="sidebar-link" data-route="#/inst/foretag">
+            <span class="sidebar-link-icon">⚙</span>
+            <span>Inställningar</span>
+          </a>
+
+          <div class="sidebar-divider"></div>
+          <p class="sidebar-label">Senaste chattar</p>
+          <div class="sidebar-recent" id="recentChatsList">
+            <p class="sidebar-empty">Inga chattar ännu</p>
           </div>
+        </div>
 
-          <section class="chat-panel" id="chatPanel">
-            <div class="chat-head">
-              <span class="agent-avatar">⊥</span>
-              <div>
-                <p class="chat-agent-name">Lodet-agenten</p>
-                <p class="chat-agent-status muted small" id="chatStatus">redo att hjälpa · powered by Claude</p>
+        <!-- ANBUD-TAB -->
+        <div class="sidebar-section" data-sidebar="anbud" hidden>
+          <button class="sidebar-cta" data-route="#/upload">
+            <span class="sidebar-cta-icon">+</span>
+            <span>Nytt anbud</span>
+          </button>
+
+          <div class="sidebar-divider"></div>
+          <p class="sidebar-label">Översikt</p>
+          <a class="sidebar-link" data-route="#/dashboard">
+            <span class="sidebar-link-icon">▦</span>
+            <span>Dashboard</span>
+          </a>
+
+          <p class="sidebar-label">Anbud</p>
+          <a class="sidebar-link" data-route="#/upload">
+            <span class="sidebar-link-icon">↑</span>
+            <span>Ladda upp MF</span>
+          </a>
+          <a class="sidebar-link" data-route="#/bids/active">
+            <span class="sidebar-link-icon">○</span>
+            <span>Pågående utkast</span>
+          </a>
+          <a class="sidebar-link" data-route="#/bids/submitted">
+            <span class="sidebar-link-icon">→</span>
+            <span>Inlämnade</span>
+          </a>
+          <a class="sidebar-link" data-route="#/bids/archive">
+            <span class="sidebar-link-icon">▣</span>
+            <span>Vunna / förlorade</span>
+          </a>
+
+          <p class="sidebar-label">Dokument</p>
+          <a class="sidebar-link" data-route="#/docs/mf">
+            <span class="sidebar-link-icon">⊞</span>
+            <span>Mängdförteckningar</span>
+          </a>
+          <a class="sidebar-link" data-route="#/docs/afb">
+            <span class="sidebar-link-icon">⊡</span>
+            <span>AF-bilagor</span>
+          </a>
+          <a class="sidebar-link" data-route="#/docs/drawings">
+            <span class="sidebar-link-icon">▤</span>
+            <span>Ritningar</span>
+          </a>
+          <a class="sidebar-link" data-route="#/historik">
+            <span class="sidebar-link-icon">⌗</span>
+            <span>Historik</span>
+          </a>
+        </div>
+
+        <!-- BIBLIOTEK-TAB -->
+        <div class="sidebar-section" data-sidebar="bibliotek" hidden>
+          <p class="sidebar-label">AMA-bibliotek</p>
+          <a class="sidebar-link" data-route="#/ama/anlaggning">
+            <span class="sidebar-link-icon">⊟</span>
+            <span>AMA Anläggning</span>
+          </a>
+          <a class="sidebar-link" data-route="#/ama/hus">
+            <span class="sidebar-link-icon">⊟</span>
+            <span>AMA Hus</span>
+          </a>
+          <a class="sidebar-link" data-route="#/ama/el">
+            <span class="sidebar-link-icon">⊟</span>
+            <span>AMA El</span>
+          </a>
+          <a class="sidebar-link" data-route="#/ama/af">
+            <span class="sidebar-link-icon">⊟</span>
+            <span>AF AMA</span>
+          </a>
+
+          <p class="sidebar-label">Mallar</p>
+          <a class="sidebar-link" data-route="#/docs/afb">
+            <span class="sidebar-link-icon">⊡</span>
+            <span>Alla mallar</span>
+          </a>
+          <a class="sidebar-link" data-route="#/mallar/anbudssumma">
+            <span class="sidebar-link-icon">·</span>
+            <span>AFB.31 Anbudssumma</span>
+          </a>
+          <a class="sidebar-link" data-route="#/mallar/ue-lista">
+            <span class="sidebar-link-icon">·</span>
+            <span>AFB.32 UE-lista</span>
+          </a>
+          <a class="sidebar-link" data-route="#/mallar/sekretess">
+            <span class="sidebar-link-icon">·</span>
+            <span>Sekretessbegäran</span>
+          </a>
+          <a class="sidebar-link" data-route="#/mallar/missiv">
+            <span class="sidebar-link-icon">·</span>
+            <span>Missiv</span>
+          </a>
+        </div>
+
+        <!-- KUNSKAPSBAS-TAB -->
+        <div class="sidebar-section" data-sidebar="kunskapsbas" hidden>
+          <p class="sidebar-label">Kunskapsbas</p>
+          <a class="sidebar-link" data-route="#/kunskapsbas">
+            <span class="sidebar-link-icon">∞</span>
+            <span>Alla cases</span>
+          </a>
+          <a class="sidebar-link" data-route="#/start">
+            <span class="sidebar-link-icon">↑</span>
+            <span>Lägg till paket</span>
+          </a>
+
+          <div class="sidebar-divider"></div>
+          <p class="sidebar-label sidebar-label-small">Tips</p>
+          <p class="sidebar-tip">Varje uppladdat paket extraheras till lärdomar som agenten använder automatiskt vid liknande projekt.</p>
+        </div>
+
+        <!-- INST-TAB -->
+        <div class="sidebar-section" data-sidebar="inst" hidden>
+          <p class="sidebar-label">Inställningar</p>
+          <a class="sidebar-link" data-route="#/inst/foretag">
+            <span class="sidebar-link-icon">·</span>
+            <span>Företagsinfo</span>
+          </a>
+          <a class="sidebar-link" data-route="#/inst/index">
+            <span class="sidebar-link-icon">·</span>
+            <span>Indexserier (E84/KPI)</span>
+          </a>
+          <a class="sidebar-link" data-route="#/inst/paslag">
+            <span class="sidebar-link-icon">·</span>
+            <span>Påslag och marginaler</span>
+          </a>
+          <a class="sidebar-link" data-route="#/inst/anvandare">
+            <span class="sidebar-link-icon">·</span>
+            <span>Användare</span>
+          </a>
+        </div>
+
+        <div class="sidebar-footer">
+          <a href="https://github.com/dennisdemirtok/lodetanbud" target="_blank" rel="noopener" class="sidebar-link sidebar-link-quiet">
+            <span>GitHub</span>
+            <span class="sidebar-link-arrow">↗</span>
+          </a>
+          <span class="version">v{{ version }}</span>
+        </div>
+      </aside>
+
+      <!-- ======================= MAIN ========================== -->
+      <div class="main">
+        <main class="content" id="content">
+
+          <!-- =================== START / AGENT =================== -->
+          <section class="view view-agent" data-view="start" hidden>
+
+            <!-- Empty state: hero + suggestions -->
+            <div class="agent-empty" id="agentEmpty">
+              <div class="agent-hero">
+                <h1 class="agent-hero-title">Vad vill du göra idag?</h1>
+                <p class="agent-hero-lede">Släpp ett förfrågningspaket eller fråga vad du vill om svenska anbud — AMA-koder, klumpsumma, AFB-bilagor, indexjustering, AB/ABT-villkor.</p>
               </div>
-            </div>
 
-            <div class="chat-messages" id="chatMessages">
-              <div class="chat-message agent">
-                <div class="chat-bubble">
-                  Hej! Fråga vad du vill om svenska anbud — AMA-koder, klumpsumma, AFB-bilagor, indexjustering, AB/ABT-villkor. Du kan också ladda upp ett förfrågningspaket nedan så hjälper jag analysera det.
+              <form class="hero-input" id="chatForm" autocomplete="off">
+                <input type="text" id="chatInput" placeholder="Fråga något för att komma igång…" maxlength="2000" />
+                <div class="hero-input-actions">
+                  <label class="hero-input-attach" id="heroAttachBtn" title="Bifoga filer">
+                    <input type="file" id="heroFileInput" accept=".pdf,.csv,.xlsx,.xlsm,.xls,.zip" multiple hidden />
+                    <span>+</span>
+                  </label>
+                  <span class="hero-input-model">Claude Opus 4.7</span>
+                  <button type="submit" id="chatSendBtn" class="hero-input-send" aria-label="Skicka">↑</button>
+                </div>
+              </form>
+
+              <div class="suggestion-grid">
+                <button class="suggestion-card" data-suggestion="package">
+                  <div class="suggestion-card-head">
+                    <span class="suggestion-icon" data-color="ockra">⊞</span>
+                    <span class="suggestion-title">Paketanalys</span>
+                  </div>
+                  <p class="suggestion-desc">Släpp förfrågningspaket — agenten klassar filer, hittar nyckeltal och föreslår nästa steg.</p>
+                  <ul class="suggestion-bullets">
+                    <li>MF, AF, ritningar, kontrakt</li>
+                    <li>UE-områden plockas automatiskt</li>
+                  </ul>
+                </button>
+
+                <button class="suggestion-card" data-suggestion="ue" data-route="#/agent/ue">
+                  <div class="suggestion-card-head">
+                    <span class="suggestion-icon" data-color="tegel">✉</span>
+                    <span class="suggestion-title">UE-mejl</span>
+                  </div>
+                  <p class="suggestion-desc">Begär offert från underentreprenörer — färdiga utkast per teknikområde.</p>
+                  <ul class="suggestion-bullets">
+                    <li>Ett mejl per UE-område</li>
+                    <li>Auto-fyllt projektnamn och deadline</li>
+                  </ul>
+                </button>
+
+                <button class="suggestion-card" data-suggestion="afb" data-route="#/docs/afb">
+                  <div class="suggestion-card-head">
+                    <span class="suggestion-icon" data-color="salvia">⊡</span>
+                    <span class="suggestion-title">AFB-mallar</span>
+                  </div>
+                  <p class="suggestion-desc">Anbudssumma, UE-lista, sekretess, missiv — fyll i värden och kopiera ut texten.</p>
+                  <ul class="suggestion-bullets">
+                    <li>AFB.31, AFB.32, sekretess, missiv</li>
+                    <li>Klipp-och-klistra-redo</li>
+                  </ul>
+                </button>
+
+                <button class="suggestion-card" data-suggestion="ama" data-route="#/ama/anlaggning">
+                  <div class="suggestion-card-head">
+                    <span class="suggestion-icon" data-color="lodbla">⊟</span>
+                    <span class="suggestion-title">AMA-bibliotek</span>
+                  </div>
+                  <p class="suggestion-desc">Bläddra koder och indexbasis per kapitel — Anläggning, Hus, El, AF.</p>
+                  <ul class="suggestion-bullets">
+                    <li>Hierarkisk vy med E84-bas</li>
+                    <li>Sektioner B, C, D, E, S, Y</li>
+                  </ul>
+                </button>
+              </div>
+
+              <div id="multiDropzone" class="dropzone dropzone-quiet" tabindex="0" role="button" aria-label="Ladda upp förfrågningspaket">
+                <input type="file" id="multiFileInput" accept=".pdf,.csv,.xlsx,.xlsm,.xls,.zip" multiple hidden />
+                <input type="file" id="folderFileInput" multiple webkitdirectory hidden />
+                <div class="dropzone-content">
+                  <span class="dropzone-icon">↑</span>
+                  <p class="dropzone-headline">Eller släpp ett helt förfrågningspaket</p>
+                  <p class="dropzone-sub">
+                    PDF · CSV · Excel · ZIP &nbsp;·&nbsp;
+                    <button type="button" class="link-btn" id="multiBrowseBtn">välj filer</button>
+                    &nbsp;eller&nbsp;
+                    <button type="button" class="link-btn" id="folderBrowseBtn">hela mappar</button>
+                    &nbsp;·&nbsp;
+                    <button type="button" class="link-btn" id="demoPackageBtn">prova med Westcon-paket</button>
+                  </p>
                 </div>
               </div>
             </div>
 
-            <form class="chat-input" id="chatForm" autocomplete="off">
-              <input type="text" id="chatInput" placeholder="Skriv en fråga…" maxlength="2000" />
-              <button type="submit" id="chatSendBtn" class="btn btn-primary">Skicka</button>
-            </form>
+            <!-- Chat state -->
+            <div class="agent-chat" id="agentChat" hidden>
+              <div class="chat-stream" id="chatMessages"></div>
+
+              <div id="agentStatus" class="status" hidden></div>
+
+              <div id="filesPanel" class="panel" hidden>
+                <div class="panel-head">
+                  <h2>Filer i paketet</h2>
+                  <span class="muted small" id="filesPanelCount"></span>
+                </div>
+                <div id="fileChips" class="file-chips"></div>
+              </div>
+
+              <div id="agentPanel" class="agent-panel" hidden>
+                <div class="agent-head">
+                  <span class="agent-avatar">⊥</span>
+                  <div>
+                    <p class="agent-name">Lodet-agenten</p>
+                    <p class="agent-role muted small">analyserar paketet · uppdaterad just nu</p>
+                  </div>
+                </div>
+                <div id="agentNarrative" class="agent-narrative"></div>
+                <div class="agent-recs-head">Rekommendationer</div>
+                <div id="agentRecs" class="agent-recs"></div>
+              </div>
+
+              <form class="chat-input chat-input-floating" id="chatFormBottom" autocomplete="off">
+                <input type="text" id="chatInputBottom" placeholder="Skriv en fråga…" maxlength="2000" />
+                <div class="chat-input-actions">
+                  <span class="hero-input-model">Claude Opus 4.7</span>
+                  <button type="submit" id="chatSendBtnBottom" class="hero-input-send" aria-label="Skicka">↑</button>
+                </div>
+              </form>
+
+              <div class="chat-status-row">
+                <span id="chatStatus" class="muted small">redo att hjälpa · powered by Claude</span>
+              </div>
+            </div>
+
           </section>
 
-          <div id="multiDropzone" class="dropzone dropzone-multi" tabindex="0" role="button" aria-label="Ladda upp förfrågningspaket">
-            <input type="file" id="multiFileInput" accept=".pdf,.csv,.xlsx,.xlsm,.xls,.zip" multiple hidden />
-            <input type="file" id="folderFileInput" multiple webkitdirectory hidden />
-            <div class="dropzone-content">
-              <div class="dropzone-icon">↑</div>
-              <p class="dropzone-headline">Dra och släpp förfrågningspaket</p>
-              <p class="dropzone-sub">
-                PDF · CSV · Excel · ZIP &nbsp;·&nbsp;
-                <button type="button" class="link-btn" id="multiBrowseBtn">välj filer</button>
-                &nbsp;eller&nbsp;
-                <button type="button" class="link-btn" id="folderBrowseBtn">hela mappar</button>
-              </p>
-              <p class="dropzone-hint">Släpp en ZIP, en mapp eller flera filer på en gång — agenten lär sig av varje paket du laddar upp.</p>
+          <!-- =================== UE-MEJL =================== -->
+          <section class="view" data-view="agent-ue" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Agent / UE-mejl</p>
+              <h1>Begär offert från underentreprenörer</h1>
+              <p class="lede">Lodet föreslår UE-områden baserat på AMA-koderna i mängdförteckningen och genererar färdiga mejlutkast.</p>
             </div>
-          </div>
 
-          <div class="actions-row">
-            <button type="button" class="btn btn-ghost" id="demoPackageBtn">Prova med Westcon-paket (1 fil)</button>
-          </div>
+            <div class="two-col">
+              <div class="panel">
+                <div class="panel-head"><h2>Värden</h2></div>
+                <form id="ueForm" class="form">
+                  <label>Projekt<input type="text" name="project_name" value="VÄG 875, GC SUNDBORN" /></label>
+                  <label>Dokumentnr<input type="text" name="document_number" value="1E12MF10" /></label>
+                  <label>Ditt företag<input type="text" name="company_name" value="Westcon Entreprenad AB" /></label>
+                  <label>Kontaktperson<input type="text" name="contact_name" value="Lars Olsson" /></label>
+                  <label>E-post<input type="email" name="contact_email" value="lars@westcon.se" /></label>
+                  <label>Telefon<input type="tel" name="contact_phone" value="070-000 00 00" /></label>
+                  <label>Deadline<input type="date" name="bid_due" /></label>
 
-          <div id="agentStatus" class="status" hidden></div>
+                  <div class="ue-areas-block">
+                    <span class="ue-areas-label">UE-områden (valda från agenten)</span>
+                    <div id="ueAreas" class="ue-area-chips"></div>
+                    <input type="text" id="ueExtraArea" placeholder="Lägg till område…" />
+                  </div>
 
-          <div id="filesPanel" class="panel" hidden>
-            <div class="panel-head">
-              <h2>Filer i paketet</h2>
-              <span class="muted small" id="filesPanelCount"></span>
-            </div>
-            <div id="fileChips" class="file-chips"></div>
-          </div>
-
-          <div id="agentPanel" class="agent-panel" hidden>
-            <div class="agent-head">
-              <span class="agent-avatar">⊥</span>
-              <div>
-                <p class="agent-name">Lodet-agenten</p>
-                <p class="agent-role muted small">analyserar paketet · uppdaterad just nu</p>
+                  <button type="submit" class="btn btn-primary">Generera mejlutkast</button>
+                </form>
               </div>
-            </div>
-            <div id="agentNarrative" class="agent-narrative"></div>
-            <div class="agent-recs-head">Rekommendationer</div>
-            <div id="agentRecs" class="agent-recs"></div>
-          </div>
 
-          <div class="quick-actions">
-            <p class="quick-actions-title">Vad vill du göra?</p>
-            <div class="quick-action-grid">
-              <button class="quick-action" data-route="#/upload">
-                <span class="qa-icon">⊞</span>
-                <span class="qa-title">Endast MF (CSV)</span>
-                <span class="qa-desc">Hoppa direkt till uppladdning av mängdförteckning</span>
-              </button>
-              <button class="quick-action" data-route="#/agent/ue">
-                <span class="qa-icon">✉</span>
-                <span class="qa-title">Skapa UE-mejl</span>
-                <span class="qa-desc">Be om offerter från underentreprenörer</span>
-              </button>
-              <button class="quick-action" data-route="#/docs/afb">
-                <span class="qa-icon">⊡</span>
-                <span class="qa-title">AFB-mallar</span>
-                <span class="qa-desc">Anbudssumma, UE-lista, sekretess, missiv</span>
-              </button>
-              <button class="quick-action" data-route="#/ama/anlaggning">
-                <span class="qa-icon">⊟</span>
-                <span class="qa-title">AMA-bibliotek</span>
-                <span class="qa-desc">Bläddra koder och indexbasis</span>
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <!-- =================== UE-MEJL =================== -->
-        <section class="view" data-view="agent-ue" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Agent / UE-mejl</p>
-            <h1>Begär offert från underentreprenörer</h1>
-            <p class="lede">Lodet föreslår UE-områden baserat på AMA-koderna i mängdförteckningen och genererar färdiga mejlutkast.</p>
-          </div>
-
-          <div class="two-col">
-            <div class="panel">
-              <div class="panel-head"><h2>Värden</h2></div>
-              <form id="ueForm" class="form">
-                <label>Projekt<input type="text" name="project_name" value="VÄG 875, GC SUNDBORN" /></label>
-                <label>Dokumentnr<input type="text" name="document_number" value="1E12MF10" /></label>
-                <label>Ditt företag<input type="text" name="company_name" value="Westcon Entreprenad AB" /></label>
-                <label>Kontaktperson<input type="text" name="contact_name" value="Lars Olsson" /></label>
-                <label>E-post<input type="email" name="contact_email" value="lars@westcon.se" /></label>
-                <label>Telefon<input type="tel" name="contact_phone" value="070-000 00 00" /></label>
-                <label>Deadline<input type="date" name="bid_due" /></label>
-
-                <div class="ue-areas-block">
-                  <span class="ue-areas-label">UE-områden (valda från agenten)</span>
-                  <div id="ueAreas" class="ue-area-chips"></div>
-                  <input type="text" id="ueExtraArea" placeholder="Lägg till område…" />
+              <div class="panel">
+                <div class="panel-head"><h2>Mejlutkast</h2></div>
+                <div id="ueDraftList" class="ue-draft-list">
+                  <div class="empty-state"><p>Välj områden och klicka "Generera mejlutkast" för att skapa förslag.</p></div>
                 </div>
-
-                <button type="submit" class="btn btn-primary">Generera mejlutkast</button>
-              </form>
-            </div>
-
-            <div class="panel">
-              <div class="panel-head"><h2>Mejlutkast</h2></div>
-              <div id="ueDraftList" class="ue-draft-list">
-                <div class="empty-state"><p>Välj områden och klicka "Generera mejlutkast" för att skapa förslag.</p></div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- =================== ÖVERSIKT =================== -->
-        <section class="view" data-view="dashboard" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Översikt</p>
-            <h1>God morgon</h1>
-            <p class="lede">Tre aktiva anbud, två deadlines i veckan. Vinstgrad senaste 12 mån: <strong id="dashWinRate">—</strong>.</p>
-          </div>
+          <!-- =================== ÖVERSIKT =================== -->
+          <section class="view" data-view="dashboard" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Översikt</p>
+              <h1>God morgon</h1>
+              <p class="lede">Tre aktiva anbud, två deadlines i veckan. Vinstgrad senaste 12 mån: <strong id="dashWinRate">—</strong>.</p>
+            </div>
 
-          <div class="card-grid stat-grid">
-            <div class="stat-card">
-              <span class="stat-icon" data-color="ockra">⊞</span>
-              <span class="stat-label">Aktiva anbud</span>
-              <span class="stat-value" id="dashActive">—</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-icon" data-color="salvia">∑</span>
-              <span class="stat-label">Totalt anbudsvärde</span>
-              <span class="stat-value" id="dashTotal">—</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-icon" data-color="tegel">↑</span>
-              <span class="stat-label">Vinstgrad 12 mån</span>
-              <span class="stat-value" id="dashWin">—</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-icon" data-color="lodbla">⊟</span>
-              <span class="stat-label">AMA-koder i bibliotek</span>
-              <span class="stat-value" id="dashAma">—</span>
-            </div>
-          </div>
-
-          <div class="two-col">
-            <div class="panel">
-              <div class="panel-head">
-                <h2>Senaste aktivitet</h2>
+            <div class="card-grid stat-grid">
+              <div class="stat-card">
+                <span class="stat-icon" data-color="ockra">⊞</span>
+                <span class="stat-label">Aktiva anbud</span>
+                <span class="stat-value" id="dashActive">—</span>
               </div>
-              <ul class="activity-list" id="dashActivity"></ul>
-            </div>
-            <div class="panel">
-              <div class="panel-head">
-                <h2>Kommande deadlines</h2>
+              <div class="stat-card">
+                <span class="stat-icon" data-color="salvia">∑</span>
+                <span class="stat-label">Totalt anbudsvärde</span>
+                <span class="stat-value" id="dashTotal">—</span>
               </div>
-              <ul class="deadline-list" id="dashDeadlines"></ul>
-            </div>
-          </div>
-        </section>
-
-        <!-- =================== UPLOAD ===================== -->
-        <section class="view" data-view="upload" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Anbud / nytt</p>
-            <h1>Ladda upp mängdförteckning</h1>
-            <p class="lede">Dra in en .csv från BidCon, Beast eller motsvarande. Lodet identifierar AMA-koder, klumpsummor och föreslår priser.</p>
-          </div>
-
-          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Ladda upp CSV-fil">
-            <input type="file" id="fileInput" accept=".csv" hidden />
-            <div class="dropzone-content">
-              <div class="dropzone-icon">↑</div>
-              <p class="dropzone-headline">Dra och släpp en mängdförteckning (.csv)</p>
-              <p class="dropzone-sub">eller <button type="button" class="link-btn" id="browseBtn">välj fil från datorn</button></p>
-              <p class="dropzone-hint">Semikolon-separerad CSV. Max 10 MB.</p>
-            </div>
-          </div>
-          <div class="actions-row">
-            <button type="button" class="btn btn-ghost" id="exampleBtn">Prova med Westcon-demo</button>
-          </div>
-          <div id="status" class="status" hidden></div>
-
-          <div id="results" class="result-block" hidden>
-            <div class="result-header">
-              <div>
-                <p class="eyebrow">Parsat dokument</p>
-                <h2 id="resultProject">—</h2>
-                <p id="resultMeta" class="muted"></p>
+              <div class="stat-card">
+                <span class="stat-icon" data-color="tegel">↑</span>
+                <span class="stat-label">Vinstgrad 12 mån</span>
+                <span class="stat-value" id="dashWin">—</span>
               </div>
-              <div class="result-actions">
-                <button type="button" class="btn btn-primary" id="downloadBtn">Hämta Excel-mall</button>
+              <div class="stat-card">
+                <span class="stat-icon" data-color="lodbla">⊟</span>
+                <span class="stat-label">AMA-koder i bibliotek</span>
+                <span class="stat-value" id="dashAma">—</span>
               </div>
             </div>
 
-            <div class="card-grid stat-grid stat-grid-tight">
-              <div class="stat-card"><span class="stat-label">Totalbelopp</span><span class="stat-value" id="statTotal">—</span></div>
-              <div class="stat-card"><span class="stat-label">Antal rader</span><span class="stat-value" id="statLines">—</span></div>
-              <div class="stat-card"><span class="stat-label">Prissatta</span><span class="stat-value" id="statPriced">—</span></div>
-              <div class="stat-card"><span class="stat-label">Klumpsumma</span><span class="stat-value" id="statLump">—</span></div>
-              <div class="stat-card"><span class="stat-label">AMA-koder</span><span class="stat-value" id="statAma">—</span></div>
-            </div>
-
-            <div class="panel">
-              <div class="panel-head">
-                <h2>Rader per AMA-grupp</h2>
-                <span class="muted small" id="tableInfo"></span>
+            <div class="two-col">
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Senaste aktivitet</h2>
+                </div>
+                <ul class="activity-list" id="dashActivity"></ul>
               </div>
-              <div class="table-scroll">
-                <table id="linesTable">
-                  <thead>
-                    <tr>
-                      <th>AMA-kod</th>
-                      <th class="col-desc">Beskrivning</th>
-                      <th class="col-num">Enhet</th>
-                      <th class="col-num">Antal</th>
-                      <th class="col-num">À-pris</th>
-                      <th class="col-num">Belopp</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Kommande deadlines</h2>
+                </div>
+                <ul class="deadline-list" id="dashDeadlines"></ul>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- ============== ANBUD-LISTOR ==================== -->
-        <section class="view" data-view="bids-active" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Anbud</p>
-            <h1>Pågående utkast</h1>
-            <p class="lede">Anbud du parsat lokalt i den här webbläsaren. I produktion lagras dessa per användare i molnet.</p>
-          </div>
-          <div class="panel">
-            <div class="panel-head">
-              <h2>Lokala utkast</h2>
-              <button class="btn btn-ghost btn-sm" id="clearLocalBtn">Rensa lokal historik</button>
+          <!-- =================== UPLOAD ===================== -->
+          <section class="view" data-view="upload" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Anbud / nytt</p>
+              <h1>Ladda upp mängdförteckning</h1>
+              <p class="lede">Dra in en .csv från BidCon, Beast eller motsvarande. Lodet identifierar AMA-koder, klumpsummor och föreslår priser.</p>
             </div>
-            <div id="localBidsList" class="bid-list"></div>
-          </div>
-        </section>
 
-        <section class="view" data-view="bids-submitted" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Anbud</p>
-            <h1>Inlämnade</h1>
-          </div>
-          <div class="empty-state">
-            <p>Inga inlämnade anbud lagras än — Supabase-integration kommer i nästa milstolpe.</p>
-            <p class="muted">Roadmap: dag 36–60 enligt teknisk spec v0.2.</p>
-          </div>
-        </section>
-
-        <section class="view" data-view="bids-archive" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Anbud</p>
-            <h1>Vunna / förlorade</h1>
-          </div>
-          <div class="empty-state">
-            <p>Arkiv visas när historisk data importerats vid pilot-onboarding.</p>
-            <p class="muted">Onboardingflöde: vecka 1 enligt spec H.2.</p>
-          </div>
-        </section>
-
-        <!-- =================== DOKUMENT =================== -->
-        <section class="view" data-view="docs-mf" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Dokument</p>
-            <h1>Mängdförteckningar</h1>
-          </div>
-          <div class="panel">
-            <div class="panel-head"><h2>Senaste parsade MF</h2></div>
-            <div id="docsMfList" class="bid-list"></div>
-          </div>
-        </section>
-
-        <section class="view" data-view="docs-afb" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Dokument</p>
-            <h1>AF-bilagor</h1>
-            <p class="lede">Förgenererade boilerplate-mallar enligt AFB-strukturen. Klicka för att fylla i värden och kopiera ut texten.</p>
-          </div>
-          <div id="afbCardGrid" class="card-grid"></div>
-        </section>
-
-        <section class="view" data-view="docs-drawings" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Dokument</p>
-            <h1>Ritningar</h1>
-          </div>
-          <div class="empty-state">
-            <p>Ritningshantering planerad efter parser-utbyggnad till Excel/PDF.</p>
-          </div>
-        </section>
-
-        <!-- =================== AMA-BIBLIOTEK ============== -->
-        <section class="view" data-view="ama" hidden>
-          <div class="page-head">
-            <p class="eyebrow">AMA-bibliotek</p>
-            <h1 id="amaTitle">—</h1>
-            <p class="lede">Hierarkisk vy av aktuellt kodsystem. Klicka på en sektion för att se underkoder. Indexbasis visas per kapitel.</p>
-          </div>
-          <div class="panel">
-            <div class="panel-head">
-              <h2 id="amaPanelTitle">Sektioner</h2>
-              <span class="muted small" id="amaCount">—</span>
+            <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Ladda upp CSV-fil">
+              <input type="file" id="fileInput" accept=".csv" hidden />
+              <div class="dropzone-content">
+                <div class="dropzone-icon">↑</div>
+                <p class="dropzone-headline">Dra och släpp en mängdförteckning (.csv)</p>
+                <p class="dropzone-sub">eller <button type="button" class="link-btn" id="browseBtn">välj fil från datorn</button></p>
+                <p class="dropzone-hint">Semikolon-separerad CSV. Max 10 MB.</p>
+              </div>
             </div>
-            <div id="amaContent" class="ama-content"></div>
-          </div>
-        </section>
+            <div class="actions-row">
+              <button type="button" class="btn btn-ghost" id="exampleBtn">Prova med Westcon-demo</button>
+            </div>
+            <div id="status" class="status" hidden></div>
 
-        <!-- =================== MALLAR ===================== -->
-        <section class="view" data-view="template" hidden>
-          <div class="page-head">
-            <p class="eyebrow" id="tmplEyebrow">Mall</p>
-            <h1 id="tmplTitle">—</h1>
-            <p class="lede" id="tmplDesc">—</p>
-          </div>
-          <div class="two-col">
-            <div class="panel">
-              <div class="panel-head"><h2>Värden</h2></div>
-              <form id="tmplForm" class="form">
-                <label>Projekt<input type="text" name="project_name" value="VÄG 875, GC SUNDBORN" /></label>
-                <label>Dokumentnr<input type="text" name="document_number" value="1E12MF10" /></label>
-                <label>Anbudsgivare<input type="text" name="company_name" value="Westcon Entreprenad AB" /></label>
-                <label data-show-for="anbudssumma">Anbudssumma (kr)<input type="number" name="total_amount" value="1687336" /></label>
-                <label data-show-for="missiv">Beställare<input type="text" name="customer_name" value="Trafikverket" /></label>
-                <label data-show-for="sekretess">Org.nr<input type="text" name="organisationsnummer" value="556000-0000" /></label>
-                <label>Kontaktperson<input type="text" name="contact_name" placeholder="Förnamn Efternamn" /></label>
-                <label data-show-for="anbudssumma">E-post<input type="email" name="contact_email" placeholder="namn@foretag.se" /></label>
-                <label data-show-for="anbudssumma">Telefon<input type="tel" name="contact_phone" placeholder="070-000 00 00" /></label>
-                <button type="submit" class="btn btn-primary">Generera</button>
-              </form>
+            <div id="results" class="result-block" hidden>
+              <div class="result-header">
+                <div>
+                  <p class="eyebrow">Parsat dokument</p>
+                  <h2 id="resultProject">—</h2>
+                  <p id="resultMeta" class="muted"></p>
+                </div>
+                <div class="result-actions">
+                  <button type="button" class="btn btn-primary" id="downloadBtn">Hämta Excel-mall</button>
+                </div>
+              </div>
+
+              <div class="card-grid stat-grid stat-grid-tight">
+                <div class="stat-card"><span class="stat-label">Totalbelopp</span><span class="stat-value" id="statTotal">—</span></div>
+                <div class="stat-card"><span class="stat-label">Antal rader</span><span class="stat-value" id="statLines">—</span></div>
+                <div class="stat-card"><span class="stat-label">Prissatta</span><span class="stat-value" id="statPriced">—</span></div>
+                <div class="stat-card"><span class="stat-label">Klumpsumma</span><span class="stat-value" id="statLump">—</span></div>
+                <div class="stat-card"><span class="stat-label">AMA-koder</span><span class="stat-value" id="statAma">—</span></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Rader per AMA-grupp</h2>
+                  <span class="muted small" id="tableInfo"></span>
+                </div>
+                <div class="table-scroll">
+                  <table id="linesTable">
+                    <thead>
+                      <tr>
+                        <th>AMA-kod</th>
+                        <th class="col-desc">Beskrivning</th>
+                        <th class="col-num">Enhet</th>
+                        <th class="col-num">Antal</th>
+                        <th class="col-num">À-pris</th>
+                        <th class="col-num">Belopp</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============== ANBUD-LISTOR ==================== -->
+          <section class="view" data-view="bids-active" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Anbud</p>
+              <h1>Pågående utkast</h1>
+              <p class="lede">Anbud du parsat lokalt i den här webbläsaren. I produktion lagras dessa per användare i molnet.</p>
             </div>
             <div class="panel">
               <div class="panel-head">
-                <h2>Förhandsvisning</h2>
-                <button class="btn btn-ghost btn-sm" id="copyTmplBtn">Kopiera</button>
+                <h2>Lokala utkast</h2>
+                <button class="btn btn-ghost btn-sm" id="clearLocalBtn">Rensa lokal historik</button>
               </div>
-              <pre class="template-preview" id="tmplPreview">Fyll i fälten och klicka "Generera".</pre>
+              <div id="localBidsList" class="bid-list"></div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- =================== KUNSKAPSBAS =================== -->
-        <section class="view" data-view="kunskapsbas" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Kunskapsbas</p>
-            <h1>Vad agenten har lärt sig</h1>
-            <p class="lede">Varje uppladdat paket sparas på Railway Volume och Claude extraherar återanvändbara lärdomar (prispunkter, UE-beslut, riskfaktorer). När du chattar väljer agenten relevanta cases automatiskt som kontext.</p>
-          </div>
+          <section class="view" data-view="bids-submitted" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Anbud</p>
+              <h1>Inlämnade</h1>
+            </div>
+            <div class="empty-state">
+              <p>Inga inlämnade anbud lagras än — Supabase-integration kommer i nästa milstolpe.</p>
+              <p class="muted">Roadmap: dag 36–60 enligt teknisk spec v0.2.</p>
+            </div>
+          </section>
 
-          <div class="card-grid stat-grid">
-            <div class="stat-card">
-              <span class="stat-icon" data-color="ockra">∞</span>
-              <span class="stat-label">Sparade cases</span>
-              <span class="stat-value" id="kbStatCases">—</span>
+          <section class="view" data-view="bids-archive" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Anbud</p>
+              <h1>Vunna / förlorade</h1>
             </div>
-            <div class="stat-card">
-              <span class="stat-icon" data-color="salvia">⊟</span>
-              <span class="stat-label">Unika AMA-koder</span>
-              <span class="stat-value" id="kbStatAma">—</span>
+            <div class="empty-state">
+              <p>Arkiv visas när historisk data importerats vid pilot-onboarding.</p>
+              <p class="muted">Onboardingflöde: vecka 1 enligt spec H.2.</p>
             </div>
-            <div class="stat-card">
-              <span class="stat-icon" data-color="tegel">✦</span>
-              <span class="stat-label">Lärdomar totalt</span>
-              <span class="stat-value" id="kbStatLessons">—</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-icon" data-color="lodbla">∑</span>
-              <span class="stat-label">Sammanlagt värde</span>
-              <span class="stat-value" id="kbStatValue">—</span>
-            </div>
-          </div>
+          </section>
 
-          <div class="panel">
-            <div class="panel-head">
-              <h2>Cases i arkivet</h2>
-              <span class="muted small">klicka för detaljer</span>
+          <!-- =================== DOKUMENT =================== -->
+          <section class="view" data-view="docs-mf" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Dokument</p>
+              <h1>Mängdförteckningar</h1>
             </div>
-            <div id="kbCaseList" class="bid-list">
-              <div class="empty-state"><p>Laddar …</p></div>
+            <div class="panel">
+              <div class="panel-head"><h2>Senaste parsade MF</h2></div>
+              <div id="docsMfList" class="bid-list"></div>
             </div>
-          </div>
+          </section>
 
-          <div class="panel" id="kbDetailPanel" hidden>
-            <div class="panel-head">
-              <h2 id="kbDetailTitle">—</h2>
-              <button class="btn btn-ghost btn-sm" id="kbDetailClose">Stäng</button>
+          <section class="view" data-view="docs-afb" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Dokument</p>
+              <h1>AF-bilagor</h1>
+              <p class="lede">Förgenererade boilerplate-mallar enligt AFB-strukturen. Klicka för att fylla i värden och kopiera ut texten.</p>
             </div>
-            <div id="kbDetailContent" class="kb-detail"></div>
-          </div>
-        </section>
+            <div id="afbCardGrid" class="card-grid"></div>
+          </section>
 
-        <!-- =================== HISTORIK =================== -->
-        <section class="view" data-view="historik" hidden>
-          <div class="page-head">
-            <p class="eyebrow">Historik</p>
-            <h1>Sökning per AMA-kod</h1>
-            <p class="lede">Hitta tidigare anbud där en viss AMA-kod använts. Kommer dra från Supabase-databasen i nästa milstolpe.</p>
-          </div>
-          <div class="panel">
-            <div class="panel-head"><h2>Lokal historik</h2></div>
-            <div id="historyContent" class="bid-list"></div>
-          </div>
-        </section>
+          <section class="view" data-view="docs-drawings" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Dokument</p>
+              <h1>Ritningar</h1>
+            </div>
+            <div class="empty-state">
+              <p>Ritningshantering planerad efter parser-utbyggnad till Excel/PDF.</p>
+            </div>
+          </section>
 
-        <!-- =================== INSTÄLLNINGAR ============== -->
-        <section class="view" data-view="inst" hidden>
-          <div class="page-head">
-            <p class="eyebrow" id="instEyebrow">Inställningar</p>
-            <h1 id="instTitle">—</h1>
-            <p class="lede" id="instDesc">—</p>
-          </div>
-          <div class="empty-state" id="instContent">
-            <p>Konfiguration sparas mot Supabase per tenant — kommer i nästa milstolpe.</p>
-            <p class="muted">Se teknisk spec v0.2 avsnitt C.2 (datamodell) för planerade fält.</p>
-          </div>
-        </section>
+          <!-- =================== AMA-BIBLIOTEK ============== -->
+          <section class="view" data-view="ama" hidden>
+            <div class="page-head">
+              <p class="eyebrow">AMA-bibliotek</p>
+              <h1 id="amaTitle">—</h1>
+              <p class="lede">Hierarkisk vy av aktuellt kodsystem. Klicka på en sektion för att se underkoder. Indexbasis visas per kapitel.</p>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <h2 id="amaPanelTitle">Sektioner</h2>
+                <span class="muted small" id="amaCount">—</span>
+              </div>
+              <div id="amaContent" class="ama-content"></div>
+            </div>
+          </section>
 
-      </main>
+          <!-- =================== MALLAR ===================== -->
+          <section class="view" data-view="template" hidden>
+            <div class="page-head">
+              <p class="eyebrow" id="tmplEyebrow">Mall</p>
+              <h1 id="tmplTitle">—</h1>
+              <p class="lede" id="tmplDesc">—</p>
+            </div>
+            <div class="two-col">
+              <div class="panel">
+                <div class="panel-head"><h2>Värden</h2></div>
+                <form id="tmplForm" class="form">
+                  <label>Projekt<input type="text" name="project_name" value="VÄG 875, GC SUNDBORN" /></label>
+                  <label>Dokumentnr<input type="text" name="document_number" value="1E12MF10" /></label>
+                  <label>Anbudsgivare<input type="text" name="company_name" value="Westcon Entreprenad AB" /></label>
+                  <label data-show-for="anbudssumma">Anbudssumma (kr)<input type="number" name="total_amount" value="1687336" /></label>
+                  <label data-show-for="missiv">Beställare<input type="text" name="customer_name" value="Trafikverket" /></label>
+                  <label data-show-for="sekretess">Org.nr<input type="text" name="organisationsnummer" value="556000-0000" /></label>
+                  <label>Kontaktperson<input type="text" name="contact_name" placeholder="Förnamn Efternamn" /></label>
+                  <label data-show-for="anbudssumma">E-post<input type="email" name="contact_email" placeholder="namn@foretag.se" /></label>
+                  <label data-show-for="anbudssumma">Telefon<input type="tel" name="contact_phone" placeholder="070-000 00 00" /></label>
+                  <button type="submit" class="btn btn-primary">Generera</button>
+                </form>
+              </div>
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Förhandsvisning</h2>
+                  <button class="btn btn-ghost btn-sm" id="copyTmplBtn">Kopiera</button>
+                </div>
+                <pre class="template-preview" id="tmplPreview">Fyll i fälten och klicka "Generera".</pre>
+              </div>
+            </div>
+          </section>
+
+          <!-- =================== KUNSKAPSBAS =================== -->
+          <section class="view" data-view="kunskapsbas" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Kunskapsbas</p>
+              <h1>Vad agenten har lärt sig</h1>
+              <p class="lede">Varje uppladdat paket sparas på Railway Volume och Claude extraherar återanvändbara lärdomar (prispunkter, UE-beslut, riskfaktorer). När du chattar väljer agenten relevanta cases automatiskt som kontext.</p>
+            </div>
+
+            <div class="card-grid stat-grid">
+              <div class="stat-card">
+                <span class="stat-icon" data-color="ockra">∞</span>
+                <span class="stat-label">Sparade cases</span>
+                <span class="stat-value" id="kbStatCases">—</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-icon" data-color="salvia">⊟</span>
+                <span class="stat-label">Unika AMA-koder</span>
+                <span class="stat-value" id="kbStatAma">—</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-icon" data-color="tegel">✦</span>
+                <span class="stat-label">Lärdomar totalt</span>
+                <span class="stat-value" id="kbStatLessons">—</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-icon" data-color="lodbla">∑</span>
+                <span class="stat-label">Sammanlagt värde</span>
+                <span class="stat-value" id="kbStatValue">—</span>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <h2>Cases i arkivet</h2>
+                <span class="muted small">klicka för detaljer</span>
+              </div>
+              <div id="kbCaseList" class="bid-list">
+                <div class="empty-state"><p>Laddar …</p></div>
+              </div>
+            </div>
+
+            <div class="panel" id="kbDetailPanel" hidden>
+              <div class="panel-head">
+                <h2 id="kbDetailTitle">—</h2>
+                <button class="btn btn-ghost btn-sm" id="kbDetailClose">Stäng</button>
+              </div>
+              <div id="kbDetailContent" class="kb-detail"></div>
+            </div>
+          </section>
+
+          <!-- =================== HISTORIK =================== -->
+          <section class="view" data-view="historik" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Historik</p>
+              <h1>Sökning per AMA-kod</h1>
+              <p class="lede">Hitta tidigare anbud där en viss AMA-kod använts. Kommer dra från Supabase-databasen i nästa milstolpe.</p>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Lokal historik</h2></div>
+              <div id="historyContent" class="bid-list"></div>
+            </div>
+          </section>
+
+          <!-- =================== INSTÄLLNINGAR ============== -->
+          <section class="view" data-view="inst" hidden>
+            <div class="page-head">
+              <p class="eyebrow" id="instEyebrow">Inställningar</p>
+              <h1 id="instTitle">—</h1>
+              <p class="lede" id="instDesc">—</p>
+            </div>
+            <div class="empty-state" id="instContent">
+              <p>Konfiguration sparas mot Supabase per tenant — kommer i nästa milstolpe.</p>
+              <p class="muted">Se teknisk spec v0.2 avsnitt C.2 (datamodell) för planerade fält.</p>
+            </div>
+          </section>
+
+        </main>
+      </div>
     </div>
 
   </div>
