@@ -912,6 +912,36 @@ kbd {
 .chat-status-row .error { color: var(--tegel); font-weight: 500; }
 
 /* ========================================================================
+   GLOBAL DRAG-OVERLAY (när man drar mapp över hela sidan)
+   ======================================================================== */
+body.global-drag-active::after {
+  content: 'Släpp för att ladda upp förfrågningsunderlaget';
+  position: fixed;
+  inset: 16px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed var(--ockra);
+  border-radius: var(--radius-lg);
+  background: rgba(212, 160, 23, 0.08);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  color: var(--lodbla);
+  font-family: var(--font-serif);
+  font-size: 1.4rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  pointer-events: none;
+  animation: drag-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes drag-pulse {
+  0%, 100% { background: rgba(212, 160, 23, 0.06); }
+  50% { background: rgba(212, 160, 23, 0.14); }
+}
+
+/* ========================================================================
    DROPZONE
    ======================================================================== */
 .dropzone {

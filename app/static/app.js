@@ -94,6 +94,7 @@ window.addEventListener('hashchange', navigate);
 
 document.addEventListener('DOMContentLoaded', () => {
   bindShell();
+  bindGlobalDropGuard();
   bindUpload();
   bindTemplateForm();
   bindStart();
@@ -104,6 +105,60 @@ document.addEventListener('DOMContentLoaded', () => {
   navigate();
   renderRecentChats();
 });
+
+// ---------- GLOBAL DROP-GUARD ------------------------------------------
+// Förhindrar att browsern navigerar bort när användaren råkar släppa filer
+// utanför dropzonen. Acceptera drop var som helst i Agent-vyn.
+
+function bindGlobalDropGuard() {
+  // Global preventDefault så att browsern inte navigerar till den droppade filen
+  ['dragenter', 'dragover'].forEach((ev) => {
+    window.addEventListener(ev, (e) => {
+      // Visa drop-feedback om vi är i agent-vyn
+      const view = document.querySelector('[data-view="start"]');
+      if (view && !view.hidden && _hasFiles(e.dataTransfer)) {
+        e.preventDefault();
+        document.body.classList.add('global-drag-active');
+      }
+    });
+  });
+
+  ['dragleave', 'dragend'].forEach((ev) => {
+    window.addEventListener(ev, (e) => {
+      // Endast ta bort feedback om vi lämnar fönstret helt
+      if (!e.relatedTarget || e.target === document) {
+        document.body.classList.remove('global-drag-active');
+      }
+    });
+  });
+
+  window.addEventListener('drop', async (e) => {
+    document.body.classList.remove('global-drag-active');
+    // Förhindra att browsern öppnar filen som URL
+    e.preventDefault();
+    // Om vi är i Agent-vyn, plocka upp filerna och kör paketanalys
+    const view = document.querySelector('[data-view="start"]');
+    if (!view || view.hidden) return;
+    if (!_hasFiles(e.dataTransfer)) return;
+
+    // Bara hantera om drop INTE redan hanterats av dropzonen
+    const dz = document.getElementById('multiDropzone');
+    if (dz && dz.contains(e.target)) return;
+
+    const files = await collectDroppedFiles(e.dataTransfer);
+    if (files.length) handlePackageFiles(files);
+  });
+}
+
+function _hasFiles(dt) {
+  if (!dt) return false;
+  if (dt.types) {
+    for (const t of dt.types) {
+      if (t === 'Files') return true;
+    }
+  }
+  return false;
+}
 
 function bindShell() {
   // Alla data-route-element navigerar
