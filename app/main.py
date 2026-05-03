@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 
 from app import __version__
 from app import afb_templates as afb
+from app import agent_insights
 from app import ama_catalog
 from app import agent as lodet_agent
 from app import case_archive
@@ -389,6 +390,15 @@ async def _analyze_filebatch(
             required_docs = list(requirement_extractor.DEFAULT_REQUIRED_DOCS)
 
         try:
+            insights = await agent_insights.extract_insights(
+                package_summary=analysis["summary"],
+                files=files_dict,
+                af_text=af_text,
+            )
+        except Exception:
+            insights = {"observations": [], "questions": [], "vendor_templates": []}
+
+        try:
             case = case_archive.save_case(
                 source=source,
                 source_name=source_name,
@@ -397,11 +407,13 @@ async def _analyze_filebatch(
                 parsed_mf=parsed_mf,
                 lessons=lessons,
                 required_docs=required_docs,
+                insights=insights,
             )
             saved_case = {
                 "id": case.id,
                 "lessons": case.lessons,
                 "required_docs": case.required_docs,
+                "insights": case.insights,
             }
         except Exception:
             saved_case = None

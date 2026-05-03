@@ -63,17 +63,30 @@ def classify(filename: str, content: bytes | None = None, content_text: str = ""
     """
     name = filename.strip()
     norm = _name_signal(name)
-    lower = norm
     text_lower = content_text.lower() if content_text else ""
-
-    # CSV — sannolikt mängdförteckning
-    if norm.endswith(".csv"):
-        if "mangd" in norm or "mf" in norm or "kalkyl" in norm:
-            return FileKind("mf", "Mängdförteckning", 0.95)
-        return FileKind("mf", "Mängdförteckning", 0.7)
 
     # ---- Filnamnsmönster (hög konfidens) — körs först --------------
     fname_no_ext = re.sub(r"\.[^.]+$", "", name)
+
+    # MF — explicit detection FÖRE alla andra (filnamn kan innehålla
+    # "teknisk beskrivning" eftersom MF ofta levereras kombinerat)
+    if "mangdforteckning" in norm:
+        if norm.endswith(".csv"):
+            return FileKind("mf", "Mängdförteckning", 0.95)
+        if norm.endswith((".xlsx", ".xlsm", ".xls")):
+            return FileKind("mf", "Mängdförteckning", 0.95)
+        if norm.endswith(".pdf"):
+            return FileKind("mf", "Mängdförteckning (PDF)", 0.88)
+
+    # À-prislista — separat dokumenttyp som inte är samma som MF
+    if "aprislista" in norm or "a-prislista" in norm or "à-prislista" in name.lower():
+        return FileKind("aprislista", "À-prislista", 0.92)
+
+    # CSV — sannolikt mängdförteckning även utan "mangd" i namnet
+    if norm.endswith(".csv"):
+        if "mf" in norm.split() or "kalkyl" in norm:
+            return FileKind("mf", "Mängdförteckning", 0.95)
+        return FileKind("mf", "Mängdförteckning", 0.7)
 
     # <projekt>IF<nr> / <projekt>RF<nr> / <projekt>MF<nr>
     ifrf = IF_RF_PATTERN.match(fname_no_ext)
@@ -103,14 +116,43 @@ def classify(filename: str, content: bytes | None = None, content_text: str = ""
     if "sekretess" in norm:
         return FileKind("sekretess", "Sekretessbegäran", 0.95)
 
-    if "kontrakt" in norm or "entreprenadkontrakt" in norm or "agreement" in norm:
-        return FileKind("kontrakt", "Entreprenadkontrakt", 0.95)
+    # EK eller "entreprenadkontrakt" — fångar både "1. EK Foo.pdf" och "Entreprenadkontrakt.pdf"
+    if (
+        "entreprenadkontrakt" in norm
+        or "kontrakt" in norm
+        or "agreement" in norm
+        or re.search(r"^[\d\.\s]*ek\b", norm)
+    ):
+        return FileKind("kontrakt", "Entreprenadkontrakt", 0.92)
 
-    if "administrativa" in norm or "foreskrifter" in norm or norm.startswith("af "):
+    # AF — fångar både "9. AF Kulturparken.pdf" och "AF Kulturparken.pdf"
+    if (
+        "administrativa" in norm
+        or "foreskrifter" in norm
+        or re.search(r"^[\d\.\s]*af\b", norm)
+    ):
         return FileKind("af", "Administrativa föreskrifter", 0.92, subtype="AF")
 
     if "teknisk beskrivning" in norm or "(tb)" in norm or norm.startswith("tb") or norm.startswith("6.3"):
         return FileKind("tb", "Teknisk beskrivning", 0.9, subtype="TB")
+
+    # Beställarens bilage-mallar — ofta nummer-prefix-baserade
+    if "cv-mall" in norm or "cv mall" in norm:
+        return FileKind("mall", "CV-mall (beställaren)", 0.92, subtype="cv")
+    if "referensuppdrag" in norm or "referensobjekt" in norm:
+        return FileKind("mall", "Referensobjekt-mall (beställaren)", 0.92, subtype="referenser")
+    if "sanningsforsakran" in norm:
+        return FileKind("mall", "Sanningsförsäkran (beställaren)", 0.92, subtype="sanning")
+    if "arbetsmiljoplan" in norm:
+        return FileKind("mall", "Arbetsmiljöplan (beställaren)", 0.9, subtype="amp")
+    if "annat foretags kapacitet" in norm:
+        return FileKind("mall", "Annat företags kapacitet (beställaren)", 0.9, subtype="kapacitet")
+    if "kontrollplan" in norm:
+        return FileKind("mall", "Kontrollplan (beställaren)", 0.85, subtype="kontroll")
+    if "riskanalys" in norm:
+        return FileKind("riskanalys", "Riskanalys", 0.9)
+    if "vaxtforteckning" in norm or "växtförteckning" in name.lower():
+        return FileKind("vaxt", "Växtförteckning", 0.9)
 
     if "innehallsforteckning" in norm:
         return FileKind("if", "Innehållsförteckning", 0.9, subtype="IF")
@@ -139,7 +181,7 @@ def classify(filename: str, content: bytes | None = None, content_text: str = ""
 
     # Excel
     if norm.endswith((".xlsx", ".xlsm", ".xls")):
-        return FileKind("mf", "Excel-mall (möjligen MF)", 0.5)
+        return FileKind("okant", "Excel-fil (oklart syfte)", 0.4)
 
     return FileKind("okant", f"Okänd: {name}", 0.1)
 

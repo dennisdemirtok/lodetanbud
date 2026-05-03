@@ -930,6 +930,8 @@ function switchAgentMode(mode) {
     if (banner) banner.hidden = true;
     const mfPanel = document.getElementById('mfEditorPanel');
     if (mfPanel) mfPanel.hidden = true;
+    const insights = document.getElementById('insightsPanel');
+    if (insights) insights.hidden = true;
     if (typeof hideUploadProgress === 'function') hideUploadProgress();
   }
 }
@@ -1135,6 +1137,7 @@ function renderMultiAgentResult(data) {
   const firstCaseId = firstResult?.saved_case?.id;
   if (firstCaseId) {
     showCaseBanner(firstResult.saved_case, firstResult.analysis);
+    renderInsights(firstResult.saved_case.insights);
     loadDraftPanel(firstCaseId);
     if (firstResult.analysis?.summary?.has_mf) {
       loadMfEditor(firstCaseId);
@@ -1143,6 +1146,7 @@ function renderMultiAgentResult(data) {
     }
   } else {
     document.getElementById('caseCreatedBanner').hidden = true;
+    document.getElementById('insightsPanel').hidden = true;
     document.getElementById('draftPanel').hidden = true;
     document.getElementById('mfEditorPanel').hidden = true;
     agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1238,6 +1242,7 @@ function renderAgentResult(analysis, savedCase) {
 
   if (savedCase && savedCase.id) {
     showCaseBanner(savedCase, analysis);
+    renderInsights(savedCase.insights);
     loadDraftPanel(savedCase.id);
     if (analysis.summary?.has_mf) {
       loadMfEditor(savedCase.id);
@@ -1246,6 +1251,7 @@ function renderAgentResult(analysis, savedCase) {
     }
   } else {
     document.getElementById('caseCreatedBanner').hidden = true;
+    document.getElementById('insightsPanel').hidden = true;
     document.getElementById('draftPanel').hidden = true;
     document.getElementById('mfEditorPanel').hidden = true;
     agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1468,6 +1474,99 @@ function downloadCaseMfExcel(caseId) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+// ---------- INSIGHTS (proaktiva observationer/frågor) ------------------
+
+const _OBSERVATION_LABELS = {
+  deadline:   { label: 'Deadline', icon: '⏱' },
+  compliance: { label: 'Krav',     icon: '⊞' },
+  risk:       { label: 'Risk',     icon: '!' },
+  scope:      { label: 'Omfång',   icon: '↔' },
+  missing:    { label: 'Saknas',   icon: '?' },
+  info:       { label: 'Info',     icon: 'i' },
+};
+
+function renderInsights(insights) {
+  const panel = document.getElementById('insightsPanel');
+  const content = document.getElementById('insightsContent');
+  const meta = document.getElementById('insightsMeta');
+  if (!panel || !content) return;
+
+  insights = insights || { observations: [], questions: [], vendor_templates: [] };
+  const observations = insights.observations || [];
+  const questions = insights.questions || [];
+  const vendorTemplates = insights.vendor_templates || [];
+
+  const total = observations.length + questions.length + vendorTemplates.length;
+
+  if (total === 0) {
+    panel.hidden = true;
+    return;
+  }
+
+  meta.textContent = `${observations.length} observation${observations.length === 1 ? '' : 'er'} · ${questions.length} fråg${questions.length === 1 ? 'a' : 'or'} · ${vendorTemplates.length} mall${vendorTemplates.length === 1 ? '' : 'ar'} från beställaren`;
+
+  const sections = [];
+
+  if (observations.length > 0) {
+    sections.push(`
+      <div class="insights-section">
+        <p class="insights-section-head">Observationer</p>
+        ${observations.map((o) => {
+          const meta = _OBSERVATION_LABELS[o.type] || _OBSERVATION_LABELS.info;
+          return `
+            <div class="insight-item">
+              <span class="insight-icon" data-type="${escapeHtml(o.type || 'info')}" title="${escapeHtml(meta.label)}">${escapeHtml(meta.icon)}</span>
+              <div class="insight-body">
+                <p class="insight-title">${escapeHtml(o.title || '')}</p>
+                <p class="insight-text">${escapeHtml(o.body || '')}</p>
+                ${o.source_section ? `<span class="insight-source">${escapeHtml(o.source_section)}</span>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `);
+  }
+
+  if (questions.length > 0) {
+    sections.push(`
+      <div class="insights-section">
+        <p class="insights-section-head">Frågor agenten har för dig</p>
+        ${questions.map((q) => `
+          <div class="insight-item">
+            <span class="insight-icon" data-type="question" title="Fråga">?</span>
+            <div class="insight-body">
+              <p class="insight-title">${escapeHtml(q.question || '')}</p>
+              ${q.why_it_matters ? `<p class="insight-question-why">${escapeHtml(q.why_it_matters)}</p>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `);
+  }
+
+  if (vendorTemplates.length > 0) {
+    sections.push(`
+      <div class="insights-section">
+        <p class="insights-section-head">Mallar från beställaren</p>
+        ${vendorTemplates.map((t) => `
+          <div class="insight-item">
+            <span class="insight-icon" data-type="template" title="Beställarens mall">⊡</span>
+            <div class="insight-body">
+              <p class="insight-title">${escapeHtml(t.filename || '')}</p>
+              <p class="insight-text">${escapeHtml(t.note || '')}</p>
+              ${t.maps_to_draft_id ? `<span class="insight-source">Mappar till: ${escapeHtml(t.maps_to_draft_id)}</span>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `);
+  }
+
+  content.innerHTML = sections.join('');
+  panel.hidden = false;
 }
 
 // ---------- ANBUD-BANNER ------------------------------------------------
@@ -1880,11 +1979,13 @@ async function loadCaseInEditor(caseId) {
       lessons: c.lessons || [],
       required_docs: c.required_docs || [],
       project_name: c.project_name,
+      insights: c.insights || { observations: [], questions: [], vendor_templates: [] },
     };
 
     lastAnalysis = fakeAnalysis;
 
     showCaseBanner(fakeSavedCase, fakeAnalysis);
+    renderInsights(fakeSavedCase.insights);
 
     // Filer-panel
     const filesPanel = document.getElementById('filesPanel');

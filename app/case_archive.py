@@ -56,6 +56,7 @@ class Case:
     ama_codes: list[str] = None  # type: ignore
     required_docs: list[dict] = None  # type: ignore  # krav extraherade från AF
     drafts: dict = None  # type: ignore               # doc_id -> {text, generated_at, edited_at}
+    insights: dict = None  # type: ignore             # {observations, questions, vendor_templates}
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -65,6 +66,8 @@ class Case:
             d["required_docs"] = []
         if d["drafts"] is None:
             d["drafts"] = {}
+        if d["insights"] is None:
+            d["insights"] = {"observations": [], "questions": [], "vendor_templates": []}
         return d
 
 
@@ -76,6 +79,7 @@ def save_case(
     parsed_mf: dict | None = None,
     lessons: list[dict] | None = None,
     required_docs: list[dict] | None = None,
+    insights: dict | None = None,
 ) -> Case:
     """Skriv ett case till disk och returnera det."""
     _ensure_dirs()
@@ -114,6 +118,7 @@ def save_case(
         ama_codes=ama_codes,
         required_docs=required_docs or [],
         drafts={},
+        insights=insights or {"observations": [], "questions": [], "vendor_templates": []},
     )
 
     path = _CASES_DIR / f"{cid}.json"

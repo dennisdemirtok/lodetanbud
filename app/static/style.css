@@ -1052,6 +1052,124 @@ kbd {
 }
 
 /* ========================================================================
+   INSIGHTS — agentens proaktiva observationer/frågor
+   ======================================================================== */
+.insights-panel {
+  border-color: var(--ockra);
+  box-shadow: 0 1px 2px rgba(212, 160, 23, 0.15);
+}
+
+.insights-panel .panel-head {
+  background: linear-gradient(180deg, #FFFEF8 0%, var(--krita) 100%);
+}
+
+.insights-content {
+  padding: 4px 0;
+}
+
+.insights-section {
+  border-bottom: 1px solid #F0EBDF;
+  padding: 14px 20px 16px;
+}
+.insights-section:last-child { border-bottom: none; }
+
+.insights-section-head {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0 0 10px;
+}
+
+.insight-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #F5F1EA;
+  align-items: start;
+}
+.insight-item:last-child { border-bottom: none; }
+
+.insight-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.insight-icon[data-type="deadline"]   { background: #F0DDD3; color: var(--tegel); }
+.insight-icon[data-type="compliance"] { background: #DBE3EB; color: var(--lodbla); }
+.insight-icon[data-type="risk"]       { background: #FBF1D8; color: #8A6A0F; }
+.insight-icon[data-type="scope"]      { background: #DCE6D4; color: var(--salvia); }
+.insight-icon[data-type="missing"]    { background: #F0DDD3; color: var(--tegel); }
+.insight-icon[data-type="info"]       { background: var(--ljusgra); color: var(--muted); }
+.insight-icon[data-type="question"]   { background: var(--lodbla); color: var(--ockra); }
+.insight-icon[data-type="template"]   { background: #DCE6D4; color: var(--salvia); }
+
+.insight-body { min-width: 0; }
+
+.insight-title {
+  margin: 0 0 4px;
+  font-weight: 500;
+  color: var(--lodbla);
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.insight-text {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.insight-source {
+  display: inline-block;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--muted-2);
+  background: var(--ljusgra);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.insight-question-why {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.insight-template-action {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--lodbla);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.insight-template-action:hover { color: var(--tegel); }
+
+.insights-empty {
+  padding: 24px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+/* ========================================================================
    ANBUDSUTKAST — intro-text + steg-numrering
    ======================================================================== */
 .draft-intro {
