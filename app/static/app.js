@@ -622,9 +622,9 @@ function bindStart() {
   ['dragleave', 'dragend', 'drop'].forEach((ev) =>
     dz.addEventListener(ev, () => dz.classList.remove('dragover'))
   );
-  dz.addEventListener('drop', (e) => {
+  dz.addEventListener('drop', async (e) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer?.files || []);
+    const files = await collectDroppedFiles(e.dataTransfer);
     if (files.length) handlePackageFiles(files);
   });
   input.addEventListener('change', (e) => {
@@ -655,6 +655,74 @@ function renderStart() {
   } else {
     switchAgentMode('empty');
   }
+}
+
+// ---------- DRAG-AND-DROP MAPP-STÖD ------------------------------------
+
+async function collectDroppedFiles(dataTransfer) {
+  if (!dataTransfer) return [];
+
+  // Föredra items + webkitGetAsEntry (stöder mappar)
+  const items = dataTransfer.items;
+  if (items && items.length && typeof items[0].webkitGetAsEntry === 'function') {
+    const entries = [];
+    for (const it of items) {
+      const entry = it.webkitGetAsEntry?.();
+      if (entry) entries.push(entry);
+    }
+    if (entries.length) {
+      const files = [];
+      for (const e of entries) {
+        files.push(...await _readEntry(e));
+      }
+      return files;
+    }
+  }
+
+  // Fallback: bara top-level filer
+  return Array.from(dataTransfer.files || []);
+}
+
+async function _readEntry(entry, prefix = '') {
+  if (!entry) return [];
+  if (entry.isFile) {
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    // Berika filen med relative path så backend-zip-handler kan se mappstruktur
+    try {
+      Object.defineProperty(file, 'webkitRelativePath', {
+        value: prefix + file.name,
+        configurable: true,
+      });
+    } catch {}
+    return [file];
+  }
+  if (entry.isDirectory) {
+    const reader = entry.createReader();
+    const all = await _readAllDirEntries(reader);
+    const out = [];
+    for (const child of all) {
+      out.push(...await _readEntry(child, prefix + entry.name + '/'));
+    }
+    return out;
+  }
+  return [];
+}
+
+function _readAllDirEntries(reader) {
+  return new Promise((resolve, reject) => {
+    const result = [];
+    const next = () => {
+      reader.readEntries((entries) => {
+        if (!entries.length) {
+          resolve(result);
+        } else {
+          result.push(...entries);
+          next();
+        }
+      }, reject);
+    };
+    next();
+  });
 }
 
 function switchAgentMode(mode) {
@@ -766,7 +834,6 @@ function renderMultiAgentResult(data) {
   lastAnalysis = data.results[0]?.analysis || null;
 
   agentPanel.hidden = false;
-  agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   // Anbudsutkast — visa drafts för första casen i multi-resultatet
   const firstCaseId = data.results[0]?.saved_case?.id;
@@ -774,6 +841,7 @@ function renderMultiAgentResult(data) {
     loadDraftPanel(firstCaseId);
   } else {
     document.getElementById('draftPanel').hidden = true;
+    agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 
@@ -863,13 +931,13 @@ function renderAgentResult(analysis, savedCase) {
   }
 
   agentPanel.hidden = false;
-  agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   // Anbudsutkast-panel: ladda required_docs för casen
   if (savedCase && savedCase.id) {
     loadDraftPanel(savedCase.id);
   } else {
     document.getElementById('draftPanel').hidden = true;
+    agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 
@@ -908,6 +976,8 @@ async function loadDraftPanel(caseId) {
 
     list.innerHTML = docs.map((doc) => renderDraftItem(doc, caseId, d.has_mf)).join('');
     bindDraftActions(caseId);
+    // Scrolla till panelen så användaren ser den direkt efter upload
+    setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
   } catch (e) {
     list.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
   }
