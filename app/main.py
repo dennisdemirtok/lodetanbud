@@ -20,6 +20,7 @@ from app import ama_catalog
 from app import agent as lodet_agent
 from app import case_archive
 from app import chat as lodet_chat
+from app import company_settings
 from app import excel_parser
 from app import file_classifier
 from app import lesson_extractor
@@ -497,15 +498,40 @@ async def api_case_delete(case_id: str) -> JSONResponse:
     return JSONResponse({"deleted": case_id})
 
 
+# --- Företagsinställningar ------------------------------------------------
+
+@app.get("/api/company")
+async def api_company_get() -> JSONResponse:
+    return JSONResponse(company_settings.get_settings())
+
+
+@app.put("/api/company")
+async def api_company_put(payload: dict = Body(...)) -> JSONResponse:
+    saved = company_settings.save_settings(payload)
+    return JSONResponse({"saved": True, "settings": saved})
+
+
 # --- Anbudsutkast (drafts per case) ---------------------------------------
 
 def _build_draft_text(case: dict, doc_id: str, doc_meta: dict) -> str:
-    """Generera utkast-text för ett krav i ett case."""
+    """Generera utkast-text för ett krav i ett case. Auto-fyller från
+    företagsinställningar och MF-totalbelopp där det är tillgängligt."""
+    company = company_settings.get_settings()
+
     project_name = case.get("project_name") or "—"
     document_number = case.get("document_number") or "—"
-    customer = case.get("customer") or "—"
-    total = case.get("total_amount_sek") or 0.0
-    company_name = case.get("summary", {}).get("company_name") or "Anbudsgivare AB"
+    customer = case.get("customer") or company.get("default_customer") or "—"
+
+    # Anbudssumma: använd alltid den senaste totalen från MF om finns
+    parsed_mf = case.get("parsed_mf") or {}
+    mf_meta = parsed_mf.get("metadata") or {}
+    total = mf_meta.get("total_amount_sek") or case.get("total_amount_sek") or 0.0
+
+    company_name = company.get("company_name") or "[ANBUDSGIVARE — fyll i under Inställningar / Företagsinfo]"
+    contact_name = company.get("contact_name") or ""
+    contact_email = company.get("contact_email") or ""
+    contact_phone = company.get("contact_phone") or ""
+    organisationsnummer = company.get("organisationsnummer") or ""
 
     if doc_id == "anbudssumma":
         return afb.anbudssumma(
@@ -513,6 +539,9 @@ def _build_draft_text(case: dict, doc_id: str, doc_meta: dict) -> str:
             document_number=document_number,
             company_name=company_name,
             total_amount=float(total),
+            contact_name=contact_name,
+            contact_email=contact_email,
+            contact_phone=contact_phone,
         )
     if doc_id == "ue-lista":
         return afb.ue_lista(project_name=project_name, company_name=company_name)
@@ -521,6 +550,8 @@ def _build_draft_text(case: dict, doc_id: str, doc_meta: dict) -> str:
             project_name=project_name,
             document_number=document_number,
             company_name=company_name,
+            organisationsnummer=organisationsnummer,
+            contact_name=contact_name,
         )
     if doc_id == "missiv":
         return afb.missiv(
@@ -528,6 +559,7 @@ def _build_draft_text(case: dict, doc_id: str, doc_meta: dict) -> str:
             document_number=document_number,
             company_name=company_name,
             customer_name=customer,
+            contact_name=contact_name,
         )
 
     # Okänt krav — generisk platsmall
@@ -549,6 +581,7 @@ Anbudsgivare:   {company_name}
 
 Datum:          {datetime.now().strftime('%Y-%m-%d')}
 
+Kontaktperson:  {contact_name or '________________________'}
 Underskrift:    ________________________________________
 """
 

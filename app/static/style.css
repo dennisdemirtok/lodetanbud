@@ -2152,6 +2152,52 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
 }
 
 /* ========================================================================
+   COMPANY FORM (Inställningar / Företagsinfo)
+   ======================================================================== */
+.company-form-panel {
+  background: var(--krita);
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 0;
+  text-align: left;
+}
+
+.company-form {
+  padding: 24px 26px;
+  gap: 16px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.form-row:has(label:only-child) {
+  grid-template-columns: 1fr;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--linjegra);
+  margin-top: 8px;
+  padding-top: 16px;
+}
+
+.form-actions button {
+  margin-top: 0;
+  align-self: auto;
+}
+
+@media (max-width: 720px) {
+  .form-row { grid-template-columns: 1fr; }
+}
+
+/* ========================================================================
    ANBUD-BANNER (visas efter upload)
    ======================================================================== */
 .case-banner {

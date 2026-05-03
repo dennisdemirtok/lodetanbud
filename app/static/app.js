@@ -31,7 +31,7 @@ const ROUTES = {
   '#/mallar/sekretess':   { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / Sekretess',      handler: () => renderTemplate('sekretess') },
   '#/mallar/missiv':      { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / Missiv',         handler: () => renderTemplate('missiv') },
   '#/historik':           { tab: 'anbud',       view: 'historik',      crumb: 'Historik',                handler: renderHistory },
-  '#/inst/foretag':       { tab: 'inst',        view: 'inst',          crumb: 'Inst / Företag',          handler: () => renderInst('Företagsinfo', 'Lagras per tenant. Företagsnamn, org.nr, kontaktuppgifter, logotyp.') },
+  '#/inst/foretag':       { tab: 'inst',        view: 'inst',          crumb: 'Inst / Företag',          handler: renderCompanyForm },
   '#/inst/index':         { tab: 'inst',        view: 'inst',          crumb: 'Inst / Index',            handler: () => renderInst('Indexserier', 'E84 per litt och KPI för indexjustering av historiska priser.') },
   '#/inst/paslag':        { tab: 'inst',        view: 'inst',          crumb: 'Inst / Påslag',           handler: () => renderInst('Påslag och marginaler', 'Standardpåslag per kategori + täckningsbidragsregler.') },
   '#/inst/anvandare':     { tab: 'inst',        view: 'inst',          crumb: 'Inst / Användare',        handler: () => renderInst('Användare', 'Roller och behörigheter. Multi-user kommer med Supabase-integration.') },
@@ -686,6 +686,91 @@ function renderInst(title, desc) {
   document.getElementById('instEyebrow').textContent = 'Inställningar';
   document.getElementById('instTitle').textContent = title;
   document.getElementById('instDesc').textContent = desc;
+  // Återställ instContent till platshållare när man lämnar företagsformuläret
+  const content = document.getElementById('instContent');
+  if (content && !content.classList.contains('empty-state')) {
+    content.className = 'empty-state';
+    content.innerHTML = '<p>Konfiguration sparas mot Supabase per tenant — kommer i nästa milstolpe.</p>'
+      + '<p class="muted">Se teknisk spec v0.2 avsnitt C.2 (datamodell) för planerade fält.</p>';
+  }
+}
+
+async function renderCompanyForm() {
+  document.getElementById('instEyebrow').textContent = 'Inställningar';
+  document.getElementById('instTitle').textContent = 'Företagsinfo';
+  document.getElementById('instDesc').textContent = 'Värdena används vid generering av anbudssumma, sekretess, missiv och UE-mejl. Sparas på serversidan så de återanvänds för alla anbud.';
+
+  const content = document.getElementById('instContent');
+  content.className = 'panel company-form-panel';
+  content.innerHTML = `
+    <form class="form company-form" id="companyForm" autocomplete="off">
+      <div class="form-row">
+        <label>Företagsnamn<input type="text" name="company_name" placeholder="Westcon Entreprenad AB" required /></label>
+        <label>Organisationsnummer<input type="text" name="organisationsnummer" placeholder="556000-0000" /></label>
+      </div>
+      <div class="form-row">
+        <label>Kontaktperson<input type="text" name="contact_name" placeholder="Lars Olsson" /></label>
+      </div>
+      <div class="form-row">
+        <label>E-post<input type="email" name="contact_email" placeholder="lars@westcon.se" /></label>
+        <label>Telefon<input type="tel" name="contact_phone" placeholder="070-000 00 00" /></label>
+      </div>
+      <div class="form-row">
+        <label>Adress<input type="text" name="address" placeholder="Storgatan 1, 123 45 Stad" /></label>
+      </div>
+      <div class="form-row">
+        <label>Standardbeställare (optional)<input type="text" name="default_customer" placeholder="Trafikverket" /></label>
+      </div>
+      <div class="form-actions">
+        <span class="muted small" id="companyFormStatus"></span>
+        <button type="submit" class="btn btn-primary">Spara</button>
+      </div>
+    </form>
+  `;
+
+  // Hämta nuvarande inställningar och fyll i fälten
+  try {
+    const res = await fetch('/api/company');
+    const settings = await res.json();
+    const form = document.getElementById('companyForm');
+    for (const [key, value] of Object.entries(settings || {})) {
+      const inp = form.querySelector(`[name="${key}"]`);
+      if (inp) inp.value = value || '';
+    }
+  } catch (e) {
+    console.warn('Kunde inte hämta företagsinställningar:', e);
+  }
+
+  document.getElementById('companyForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const status = document.getElementById('companyFormStatus');
+    const fd = new FormData(form);
+    const payload = Object.fromEntries(fd.entries());
+
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    status.textContent = 'Sparar…';
+    status.className = 'muted small';
+
+    try {
+      const res = await fetch('/api/company', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await res.json();
+      status.textContent = 'Sparat ✓';
+      status.className = 'small';
+      status.style.color = 'var(--salvia)';
+    } catch (err) {
+      status.textContent = `Fel: ${err.message}`;
+      status.style.color = 'var(--tegel)';
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 // ---------- START / AGENT ------------------------------------------------

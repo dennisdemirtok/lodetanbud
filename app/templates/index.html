@@ -362,21 +362,13 @@
                 <div id="agentRecs" class="agent-recs"></div>
               </div>
 
-              <div id="draftPanel" class="panel draft-panel" hidden>
-                <div class="panel-head">
-                  <h2>Anbudsutkast</h2>
-                  <span class="muted small" id="draftPanelMeta"></span>
-                </div>
-                <div class="draft-intro">
-                  <p class="draft-intro-text">Gå igenom kraven nedan i ordning. För varje obligatoriskt krav: klicka <strong>Generera</strong> för att skapa ett utkast, <strong>Redigera</strong> för att finjustera texten och <strong>Hämta PDF</strong> för att ladda ner det färdiga dokumentet. Mängdförteckningen redigeras i tabellen längre ned och hämtas som Excel/CSV.</p>
-                </div>
-                <div id="draftList" class="draft-list"></div>
-              </div>
-
               <div id="mfEditorPanel" class="panel mf-editor-panel" hidden>
                 <div class="panel-head">
-                  <h2>Mängdförteckning — redigerbar</h2>
+                  <h2>Steg 1 · Mängdförteckning</h2>
                   <span class="muted small" id="mfEditorMeta"></span>
+                </div>
+                <div class="draft-intro">
+                  <p class="draft-intro-text">Grundstommen i anbudet. Fyll i <strong>à-pris</strong> per rad — belopp och totalsumma uppdateras live. Auto-sparas 1.5 sekund efter senaste tangent. När du är klar med priserna är anbudssumman, sekretessen och missivet bara avskärmningar i Steg 2.</p>
                 </div>
                 <div class="mf-editor-toolbar">
                   <div class="mf-grand-total">
@@ -411,6 +403,17 @@
                 <div class="mf-editor-footer">
                   <button type="button" class="btn btn-ghost btn-sm" id="mfAddRowBtn">+ Ny rad</button>
                 </div>
+              </div>
+
+              <div id="draftPanel" class="panel draft-panel" hidden>
+                <div class="panel-head">
+                  <h2>Steg 2 · Anbudsdokument</h2>
+                  <span class="muted small" id="draftPanelMeta"></span>
+                </div>
+                <div class="draft-intro">
+                  <p class="draft-intro-text">De här dokumenten är avskärmningar runt mängdförteckningen. <strong>Anbudssumma</strong> hämtar totalbeloppet från Steg 1, övriga texter (sekretess, missiv, UE-lista) auto-fylls från företagsdata under <a href="#/inst/foretag">Inställningar / Företagsinfo</a>. Om något fält är tomt visas en platshållare — fyll i där för konsekvens.</p>
+                </div>
+                <div id="draftList" class="draft-list"></div>
               </div>
 
               <form class="chat-input chat-input-floating" id="chatFormBottom" autocomplete="off">
