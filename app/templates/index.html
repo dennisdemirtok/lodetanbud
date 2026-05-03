@@ -309,6 +309,25 @@
 
               <div id="agentStatus" class="status" hidden></div>
 
+              <div id="uploadProgress" class="upload-progress" hidden>
+                <div class="upload-progress-head">
+                  <h3 class="upload-progress-title">Analyserar förfrågningsunderlaget</h3>
+                  <span class="upload-progress-estimate" id="uploadProgressEstimate">~60 sek kvar</span>
+                </div>
+                <p class="upload-progress-phase" id="uploadProgressPhase">Läser filer…</p>
+                <div class="upload-progress-bar">
+                  <div class="upload-progress-bar-fill" id="uploadProgressFill"></div>
+                </div>
+                <ul class="upload-progress-steps" id="uploadProgressSteps">
+                  <li data-phase="read">Läser och packar upp filer</li>
+                  <li data-phase="classify">Klassificerar dokumenttyper</li>
+                  <li data-phase="af">Extraherar AF-text</li>
+                  <li data-phase="claude-req">Frågar Claude vilka dokument anbudet ska innehålla</li>
+                  <li data-phase="claude-lessons">Extraherar lärdomar för kunskapsbasen</li>
+                  <li data-phase="save">Sparar i arkivet</li>
+                </ul>
+              </div>
+
               <div id="caseCreatedBanner" class="case-banner" hidden>
                 <span class="case-banner-icon">✓</span>
                 <div class="case-banner-body">
@@ -347,6 +366,9 @@
                 <div class="panel-head">
                   <h2>Anbudsutkast</h2>
                   <span class="muted small" id="draftPanelMeta"></span>
+                </div>
+                <div class="draft-intro">
+                  <p class="draft-intro-text">Gå igenom kraven nedan i ordning. För varje obligatoriskt krav: klicka <strong>Generera</strong> för att skapa ett utkast, <strong>Redigera</strong> för att finjustera texten och <strong>Hämta PDF</strong> för att ladda ner det färdiga dokumentet. Mängdförteckningen redigeras i tabellen längre ned och hämtas som Excel/CSV.</p>
                 </div>
                 <div id="draftList" class="draft-list"></div>
               </div>

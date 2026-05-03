@@ -845,6 +845,7 @@ function switchAgentMode(mode) {
     if (banner) banner.hidden = true;
     const mfPanel = document.getElementById('mfEditorPanel');
     if (mfPanel) mfPanel.hidden = true;
+    if (typeof hideUploadProgress === 'function') hideUploadProgress();
   }
 }
 
@@ -853,13 +854,9 @@ async function handlePackageFiles(files) {
   switchAgentMode('chat');
 
   const status = document.getElementById('agentStatus');
-  status.hidden = false;
-  status.className = 'status loading';
-  const zipCount = files.filter((f) => f.name.toLowerCase().endsWith('.zip')).length;
-  const desc = zipCount > 0
-    ? `${files.length} fil${files.length === 1 ? '' : 'er'} (${zipCount} ZIP)`
-    : `${files.length} fil${files.length === 1 ? '' : 'er'}`;
-  status.textContent = `Skickar ${desc} till agenten — extraherar lärdomar med Claude …`;
+  status.hidden = true;
+
+  showUploadProgress(files);
 
   const fd = new FormData();
   for (const f of files) fd.append('files', f);
@@ -872,6 +869,8 @@ async function handlePackageFiles(files) {
     }
     const data = await res.json();
 
+    finishUploadProgress();
+
     if (data.multi) {
       renderMultiAgentResult(data);
     } else {
@@ -879,11 +878,122 @@ async function handlePackageFiles(files) {
       renderAgentResult(data.analysis, data.saved_case);
       if (data.parsed_mf) saveMfToHistory(data.parsed_mf);
     }
-    status.hidden = true;
+    setTimeout(hideUploadProgress, 800);
   } catch (e) {
+    hideUploadProgress();
+    status.hidden = false;
     status.className = 'status error';
     status.textContent = `Fel: ${e.message}`;
   }
+}
+
+// ---------- UPLOAD PROGRESS UI ----------------------------------------
+
+let _uploadProgressTimer = null;
+let _uploadProgressStart = 0;
+let _uploadProgressEstimate = 60;
+
+function showUploadProgress(files) {
+  const el = document.getElementById('uploadProgress');
+  if (!el) return;
+  el.hidden = false;
+
+  const fileCount = files.length;
+  // Estimat: 5s baseline + 1.5s per fil + 25s för Claude-anrop
+  const estimate = Math.max(20, Math.round(5 + fileCount * 1.5 + 25));
+  _uploadProgressEstimate = estimate;
+  _uploadProgressStart = Date.now();
+
+  document.getElementById('uploadProgressEstimate').textContent = `~${estimate} sek kvar`;
+
+  // Sex faser med ungefärliga andelar av totalen
+  const phases = [
+    { key: 'read',           text: 'Läser och packar upp filer…',                         fraction: 0.10 },
+    { key: 'classify',       text: `Klassificerar ${fileCount} dokument…`,                fraction: 0.25 },
+    { key: 'af',             text: 'Extraherar AF-text för krav-analys…',                 fraction: 0.10 },
+    { key: 'claude-req',     text: 'Frågar Claude vilka dokument anbudet ska innehålla…', fraction: 0.25 },
+    { key: 'claude-lessons', text: 'Extraherar lärdomar för kunskapsbasen…',              fraction: 0.25 },
+    { key: 'save',           text: 'Sparar i arkivet…',                                   fraction: 0.05 },
+  ];
+  // Cumulative seconds där varje fas börjar
+  let cum = 0;
+  phases.forEach((p) => { p.startSec = cum; cum += p.fraction * estimate; });
+
+  // Återställ alla steg-li:n
+  document.querySelectorAll('#uploadProgressSteps li').forEach((li) => {
+    li.classList.remove('active', 'done');
+  });
+
+  if (_uploadProgressTimer) clearInterval(_uploadProgressTimer);
+
+  const phaseEl = document.getElementById('uploadProgressPhase');
+  const fillEl = document.getElementById('uploadProgressFill');
+  const estEl = document.getElementById('uploadProgressEstimate');
+
+  function tick() {
+    const elapsed = (Date.now() - _uploadProgressStart) / 1000;
+
+    // Hitta aktuell fas
+    let activeIdx = 0;
+    for (let i = 0; i < phases.length; i++) {
+      if (elapsed >= phases[i].startSec) activeIdx = i;
+    }
+    // Cap så vi inte går förbi sista fasen även om analysen drar ut
+    activeIdx = Math.min(activeIdx, phases.length - 1);
+
+    phaseEl.textContent = phases[activeIdx].text;
+
+    // Markera steg
+    document.querySelectorAll('#uploadProgressSteps li').forEach((li, i) => {
+      if (i < activeIdx) {
+        li.classList.add('done');
+        li.classList.remove('active');
+      } else if (i === activeIdx) {
+        li.classList.add('active');
+        li.classList.remove('done');
+      } else {
+        li.classList.remove('active', 'done');
+      }
+    });
+
+    // Progress-bar: linjär mot estimate, men stannar vid 92% tills servern svarar
+    const pct = Math.min(92, (elapsed / estimate) * 92);
+    fillEl.style.width = `${pct}%`;
+
+    // Tids-räknare
+    const remaining = Math.max(0, estimate - Math.round(elapsed));
+    estEl.textContent = remaining > 0 ? `~${remaining} sek kvar` : 'snart klart…';
+  }
+
+  tick();
+  _uploadProgressTimer = setInterval(tick, 500);
+}
+
+function finishUploadProgress() {
+  // Markera alla steg som klara + dra fill till 100%
+  if (_uploadProgressTimer) {
+    clearInterval(_uploadProgressTimer);
+    _uploadProgressTimer = null;
+  }
+  document.querySelectorAll('#uploadProgressSteps li').forEach((li) => {
+    li.classList.remove('active');
+    li.classList.add('done');
+  });
+  const fill = document.getElementById('uploadProgressFill');
+  if (fill) fill.style.width = '100%';
+  const phase = document.getElementById('uploadProgressPhase');
+  if (phase) phase.textContent = 'Klart!';
+  const est = document.getElementById('uploadProgressEstimate');
+  if (est) est.textContent = '✓';
+}
+
+function hideUploadProgress() {
+  if (_uploadProgressTimer) {
+    clearInterval(_uploadProgressTimer);
+    _uploadProgressTimer = null;
+  }
+  const el = document.getElementById('uploadProgress');
+  if (el) el.hidden = true;
 }
 
 function renderMultiAgentResult(data) {
