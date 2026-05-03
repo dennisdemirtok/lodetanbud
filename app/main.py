@@ -20,6 +20,7 @@ from app import ama_catalog
 from app import agent as lodet_agent
 from app import case_archive
 from app import chat as lodet_chat
+from app import excel_parser
 from app import file_classifier
 from app import lesson_extractor
 from app import pdf_extractor
@@ -300,10 +301,15 @@ def _classify_one(filename: str, data: bytes) -> tuple[lodet_agent.FileInfo, dic
     kind = file_classifier.classify(filename, data, content_text)
 
     parsed_mf: dict | None = None
-    if kind.type == "mf" and filename.lower().endswith(".csv"):
+    lower_name = filename.lower()
+    if kind.type == "mf":
         try:
-            doc = parse_csv_bytes(data)
-            parsed_mf = doc.to_dict()
+            if lower_name.endswith(".csv"):
+                doc = parse_csv_bytes(data)
+                parsed_mf = doc.to_dict()
+            elif lower_name.endswith((".xlsx", ".xlsm")):
+                doc = excel_parser.parse_excel_bytes(data)
+                parsed_mf = doc.to_dict()
         except Exception:
             pass
 
