@@ -2767,6 +2767,272 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
 }
 
 /* ========================================================================
+   À-PRIS-KALKYL (resurser per MF-rad)
+   ======================================================================== */
+.mf-row-calc {
+  background: none;
+  border: 1px solid var(--linjegra);
+  color: var(--lodbla);
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  transition: background 0.12s, border-color 0.12s;
+  margin-right: 4px;
+}
+.mf-row-calc:hover {
+  background: var(--bg-sidebar);
+  border-color: var(--lodbla);
+}
+.mf-row-calc.has-resources {
+  border-color: var(--salvia);
+  color: var(--salvia);
+  background: #DCE6D4;
+}
+
+.modal-card-wide { max-width: 1100px; }
+
+.modal-body-scroll {
+  flex: 1;
+  overflow: auto;
+}
+
+.calc-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 12px;
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius);
+}
+
+.calc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.calc-table thead {
+  background: var(--ljusgra);
+}
+
+.calc-table th {
+  padding: 9px 10px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lodbla);
+  border-bottom: 1px solid var(--linjegra);
+}
+
+.calc-table th.col-num,
+.calc-table td.col-num { text-align: right; }
+.calc-table th.col-action,
+.calc-table td.col-action { width: 36px; padding: 4px 6px; text-align: center; }
+
+.calc-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #F5F1EA;
+  vertical-align: middle;
+}
+.calc-table tr:last-child td { border-bottom: none; }
+
+.calc-cell-input,
+.calc-cell-select {
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--jarn);
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+  width: 100%;
+}
+
+.calc-cell-input.num { font-family: var(--font-mono); text-align: right; max-width: 80px; }
+.calc-cell-select { min-width: 220px; }
+
+.calc-cell-input:hover,
+.calc-cell-select:hover {
+  border-color: var(--linjegra);
+  background: var(--krita);
+}
+
+.calc-cell-input:focus,
+.calc-cell-select:focus {
+  border-color: var(--lodbla);
+  background: var(--krita);
+  box-shadow: 0 0 0 2px rgba(28, 44, 58, 0.08);
+}
+
+.calc-cost {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--lodbla);
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.calc-row-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--muted);
+}
+
+.calc-foot {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.calc-totals {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.calc-total-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calc-total-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.calc-total-value {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--lodbla);
+}
+
+/* ========================================================================
+   RESURSBIBLIOTEK (Inställningar / Resurser)
+   ======================================================================== */
+.resources-panel {
+  background: var(--krita);
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+}
+
+.resources-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--linjegra);
+  background: var(--bg-sidebar);
+  flex-wrap: wrap;
+}
+
+.resources-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.resources-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.resources-table thead {
+  background: var(--ljusgra);
+}
+
+.resources-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lodbla);
+  border-bottom: 1px solid var(--linjegra);
+}
+
+.resources-table th.col-num,
+.resources-table td.col-num { text-align: right; }
+
+.resources-table td {
+  padding: 8px 14px;
+  border-bottom: 1px solid #F0EBDF;
+}
+
+.resources-table tr:last-child td { border-bottom: none; }
+
+.resources-table tr:hover td { background: var(--bg-sidebar); }
+
+.resource-type-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  background: var(--ljusgra);
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.resource-type-pill[data-type="maskin_forare"]    { background: #DBE3EB; color: var(--lodbla); }
+.resource-type-pill[data-type="maskin"]            { background: #DCE6D4; color: var(--salvia); }
+.resource-type-pill[data-type="arbetare"]          { background: #FBF1D8; color: #8A6A0F; }
+.resource-type-pill[data-type="material"]          { background: #F0DDD3; color: var(--tegel); }
+.resource-type-pill[data-type="underentreprenor"]  { background: #E8DEF0; color: #5C3D8A; }
+
+.resource-edit-form {
+  padding: 16px 20px;
+  background: #FFFEF8;
+  border-top: 1px solid var(--linjegra);
+  border-bottom: 1px solid var(--linjegra);
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.resource-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.resource-edit-form input,
+.resource-edit-form select {
+  font: inherit;
+  font-size: 0.92rem;
+  padding: 7px 10px;
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius-sm);
+  background: var(--krita);
+  color: var(--jarn);
+  outline: none;
+}
+
+.resource-edit-form input:focus,
+.resource-edit-form select:focus { border-color: var(--lodbla); }
+
+@media (max-width: 920px) {
+  .resource-edit-form { grid-template-columns: 1fr 1fr; }
+}
+
+/* ========================================================================
    MODAL (utkast-redigerare)
    ======================================================================== */
 .modal-overlay {

@@ -28,6 +28,7 @@ from app import lesson_extractor
 from app import pdf_extractor
 from app import pdf_renderer
 from app import requirement_extractor
+from app import resource_library
 from app import ue_emailer
 from app import zip_handler
 from app.excel_builder import build_workbook
@@ -508,6 +509,58 @@ async def api_case_delete(case_id: str) -> JSONResponse:
     if not case_archive.delete_case(case_id):
         raise HTTPException(status_code=404, detail="Case hittades inte")
     return JSONResponse({"deleted": case_id})
+
+
+# --- Resursbibliotek ------------------------------------------------------
+
+@app.get("/api/resources")
+async def api_resources_list() -> JSONResponse:
+    return JSONResponse({
+        "resources": resource_library.list_resources(),
+        "types": resource_library.RESOURCE_TYPES,
+    })
+
+
+@app.post("/api/resources")
+async def api_resources_create(payload: dict = Body(...)) -> JSONResponse:
+    try:
+        res = resource_library.create_resource(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse(res)
+
+
+@app.put("/api/resources/{resource_id}")
+async def api_resources_update(resource_id: str, payload: dict = Body(...)) -> JSONResponse:
+    try:
+        res = resource_library.update_resource(resource_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if res is None:
+        raise HTTPException(status_code=404, detail="Resursen hittades inte")
+    return JSONResponse(res)
+
+
+@app.delete("/api/resources/{resource_id}")
+async def api_resources_delete(resource_id: str) -> JSONResponse:
+    if not resource_library.delete_resource(resource_id):
+        raise HTTPException(status_code=404, detail="Resursen hittades inte")
+    return JSONResponse({"deleted": resource_id})
+
+
+@app.post("/api/resources/seed")
+async def api_resources_seed() -> JSONResponse:
+    added = resource_library.seed_defaults()
+    return JSONResponse({"added": added})
+
+
+@app.post("/api/resources/calculate")
+async def api_resources_calculate(payload: dict = Body(...)) -> JSONResponse:
+    """Räkna ut totalkostnad/à-pris för en lista av resurser kopplade till en MF-rad."""
+    line_resources = payload.get("resources") or []
+    line_quantity = payload.get("line_quantity")
+    result = resource_library.calculate_line(line_resources, line_quantity)
+    return JSONResponse(result)
 
 
 # --- Företagsinställningar ------------------------------------------------

@@ -32,6 +32,7 @@ const ROUTES = {
   '#/mallar/missiv':      { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / Missiv',         handler: () => renderTemplate('missiv') },
   '#/historik':           { tab: 'anbud',       view: 'historik',      crumb: 'Historik',                handler: renderHistory },
   '#/inst/foretag':       { tab: 'inst',        view: 'inst',          crumb: 'Inst / Företag',          handler: renderCompanyForm },
+  '#/inst/resurser':      { tab: 'inst',        view: 'inst',          crumb: 'Inst / Resurser',         handler: renderResourcesView },
   '#/inst/index':         { tab: 'inst',        view: 'inst',          crumb: 'Inst / Index',            handler: () => renderInst('Indexserier', 'E84 per litt och KPI för indexjustering av historiska priser.') },
   '#/inst/paslag':        { tab: 'inst',        view: 'inst',          crumb: 'Inst / Påslag',           handler: () => renderInst('Påslag och marginaler', 'Standardpåslag per kategori + täckningsbidragsregler.') },
   '#/inst/anvandare':     { tab: 'inst',        view: 'inst',          crumb: 'Inst / Användare',        handler: () => renderInst('Användare', 'Roller och behörigheter. Multi-user kommer med Supabase-integration.') },
@@ -101,6 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindUeForm();
   bindChat();
   bindDraftModal();
+  bindCalcModal();
   if (!location.hash) location.hash = '#/start';
   navigate();
   renderRecentChats();
@@ -1678,6 +1680,12 @@ function renderMfEditorRows() {
   tbody.querySelectorAll('.mf-row-delete').forEach((btn) => {
     btn.addEventListener('click', onMfDeleteRow);
   });
+  tbody.querySelectorAll('.mf-row-calc').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(btn.dataset.lineIndex, 10);
+      if (!Number.isNaN(idx)) openCalcModal(idx);
+    });
+  });
 }
 
 function renderMfRow(line, i) {
@@ -1704,6 +1712,7 @@ function renderMfRow(line, i) {
       </td>
       <td class="col-num"><span class="mf-amount" data-amount-for="${i}">${amount == null ? '—' : `${fmtSEK.format(amount)} kr`}</span></td>
       <td class="col-action">
+        <button type="button" class="mf-row-calc${(line._resources && line._resources.length) ? ' has-resources' : ''}" data-line-index="${i}" title="Räkna à-pris från resurser" aria-label="Räkna à-pris från resurser">∑</button>
         <button type="button" class="mf-row-delete" data-line-index="${i}" title="Ta bort rad" aria-label="Ta bort rad">✕</button>
       </td>
     </tr>
@@ -2595,6 +2604,394 @@ function restoreChat(id) {
   }
   location.hash = '#/start';
   renderRecentChats();
+}
+
+// ---------- RESURSBIBLIOTEK (Inställningar / Resurser) ------------------
+
+let _resourceCache = [];
+let _resourceTypes = {};
+
+async function renderResourcesView() {
+  document.getElementById('instEyebrow').textContent = 'Inställningar';
+  document.getElementById('instTitle').textContent = 'Resursbibliotek';
+  document.getElementById('instDesc').textContent = 'Företagets katalog över kalkyleringsresurser — maskiner, arbetare, material, underentreprenörer. Används för att räkna à-priser per MF-rad.';
+
+  const content = document.getElementById('instContent');
+  content.className = 'panel resources-panel';
+  content.innerHTML = `
+    <div class="resources-toolbar">
+      <span class="muted small" id="resourcesCountLabel">Laddar …</span>
+      <div class="resources-toolbar-actions">
+        <button type="button" class="btn btn-ghost btn-sm" id="resourcesSeedBtn">Lägg in standardresurser</button>
+        <button type="button" class="btn btn-primary btn-sm" id="resourcesAddBtn">+ Ny resurs</button>
+      </div>
+    </div>
+    <div id="resourcesEditFormContainer"></div>
+    <div class="resources-table-wrap">
+      <table class="resources-table">
+        <thead>
+          <tr>
+            <th>Namn</th>
+            <th>Typ</th>
+            <th>Kategori</th>
+            <th>Enhet</th>
+            <th class="col-num">Á-pris</th>
+            <th class="col-action"></th>
+          </tr>
+        </thead>
+        <tbody id="resourcesTbody"></tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById('resourcesAddBtn').addEventListener('click', () => showResourceEditForm(null));
+  document.getElementById('resourcesSeedBtn').addEventListener('click', async () => {
+    if (!confirm('Lägg in standardresurser i biblioteket?')) return;
+    try {
+      const res = await fetch('/api/resources/seed', { method: 'POST' });
+      const d = await res.json();
+      alert(`${d.added} resurser tillagda.`);
+      loadResources();
+    } catch (e) {
+      alert(`Fel: ${e.message}`);
+    }
+  });
+
+  loadResources();
+}
+
+async function loadResources() {
+  try {
+    const res = await fetch('/api/resources');
+    const d = await res.json();
+    _resourceCache = d.resources || [];
+    _resourceTypes = d.types || {};
+    renderResourcesTable();
+  } catch (e) {
+    document.getElementById('resourcesTbody').innerHTML = `<tr><td colspan="6">Fel: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderResourcesTable() {
+  const tbody = document.getElementById('resourcesTbody');
+  const count = document.getElementById('resourcesCountLabel');
+  if (!tbody) return;
+
+  count.textContent = `${_resourceCache.length} resurser i biblioteket`;
+
+  if (_resourceCache.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:36px;color:var(--muted)">Inga resurser än. Klicka "Lägg in standardresurser" för att börja.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = _resourceCache.map((r) => `
+    <tr data-resource-id="${escapeAttr(r.id)}">
+      <td><strong>${escapeHtml(r.name)}</strong></td>
+      <td><span class="resource-type-pill" data-type="${escapeHtml(r.type)}">${escapeHtml(_resourceTypes[r.type] || r.type)}</span></td>
+      <td>${escapeHtml(r.category || '—')}</td>
+      <td>${escapeHtml(r.unit || '—')}</td>
+      <td class="col-num"><span class="mono">${fmtSEK.format(r.cost_per_unit || 0)} kr/${escapeHtml(r.unit || 'st')}</span></td>
+      <td class="col-action">
+        <button type="button" class="draft-action" data-action="edit">Ändra</button>
+        <button type="button" class="mf-row-delete" data-action="delete" title="Ta bort">✕</button>
+      </td>
+    </tr>
+  `).join('');
+
+  tbody.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.closest('[data-resource-id]').dataset.resourceId;
+      const r = _resourceCache.find((x) => x.id === id);
+      if (r) showResourceEditForm(r);
+    });
+  });
+  tbody.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.closest('[data-resource-id]').dataset.resourceId;
+      const r = _resourceCache.find((x) => x.id === id);
+      if (!r || !confirm(`Ta bort "${r.name}"?`)) return;
+      try {
+        const res = await fetch(`/api/resources/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        loadResources();
+      } catch (e) {
+        alert(`Fel: ${e.message}`);
+      }
+    });
+  });
+}
+
+function showResourceEditForm(existing) {
+  const container = document.getElementById('resourcesEditFormContainer');
+  if (!container) return;
+
+  const isNew = !existing;
+  const r = existing || { name: '', type: 'maskin_forare', category: '', unit: 'tim', cost_per_unit: 0 };
+
+  const typeOptions = Object.entries(_resourceTypes).map(([key, label]) =>
+    `<option value="${escapeAttr(key)}" ${key === r.type ? 'selected' : ''}>${escapeHtml(label)}</option>`
+  ).join('');
+
+  container.innerHTML = `
+    <form class="resource-edit-form" id="resourceEditForm">
+      <label>Namn<input type="text" name="name" value="${escapeAttr(r.name)}" required /></label>
+      <label>Typ<select name="type">${typeOptions}</select></label>
+      <label>Kategori<input type="text" name="category" value="${escapeAttr(r.category)}" /></label>
+      <label>Enhet<input type="text" name="unit" value="${escapeAttr(r.unit)}" placeholder="tim/m/st/ton" /></label>
+      <label>Á-pris (kr)<input type="number" step="0.01" name="cost_per_unit" value="${r.cost_per_unit}" required /></label>
+      <div style="display:flex;gap:6px;align-items:end">
+        <button type="submit" class="btn btn-primary btn-sm">${isNew ? 'Skapa' : 'Spara'}</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="resourceEditCancel">Avbryt</button>
+      </div>
+    </form>
+  `;
+
+  document.getElementById('resourceEditCancel').addEventListener('click', () => {
+    container.innerHTML = '';
+  });
+
+  document.getElementById('resourceEditForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    payload.cost_per_unit = Number(payload.cost_per_unit);
+
+    try {
+      const url = isNew ? '/api/resources' : `/api/resources/${encodeURIComponent(existing.id)}`;
+      const method = isNew ? 'POST' : 'PUT';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await safeJson(res);
+        throw new Error(err?.detail || `HTTP ${res.status}`);
+      }
+      container.innerHTML = '';
+      loadResources();
+    } catch (err) {
+      alert(`Fel: ${err.message}`);
+    }
+  });
+}
+
+// ---------- À-PRIS-KALKYL-MODAL ----------------------------------------
+
+let _calcLineIndex = null;
+let _calcResources = [];
+
+function bindCalcModal() {
+  const modal = document.getElementById('calcModal');
+  if (!modal) return;
+  document.getElementById('calcModalClose').addEventListener('click', closeCalcModal);
+  document.getElementById('calcModalCancel').addEventListener('click', closeCalcModal);
+  document.getElementById('calcAddResourceBtn').addEventListener('click', () => addCalcRow());
+  document.getElementById('calcApplyBtn').addEventListener('click', applyCalcToLine);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeCalcModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.hidden) closeCalcModal();
+  });
+}
+
+async function openCalcModal(lineIndex) {
+  if (!mfEditorState.parsedMf) return;
+  const line = mfEditorState.parsedMf.lines[lineIndex];
+  if (!line) return;
+
+  _calcLineIndex = lineIndex;
+
+  // Säkerställ att vi har resurs-cache laddad
+  if (_resourceCache.length === 0) {
+    try {
+      const res = await fetch('/api/resources');
+      const d = await res.json();
+      _resourceCache = d.resources || [];
+      _resourceTypes = d.types || {};
+    } catch {}
+  }
+
+  // Title + sub
+  document.getElementById('calcModalTitle').textContent = line.description || '(utan beskrivning)';
+  const codeStr = line.ama_code ? `${line.ama_code} · ` : '';
+  document.getElementById('calcModalSub').textContent = `${codeStr}${line.quantity ?? '?'} ${line.unit || ''}`;
+  document.getElementById('calcLineQuantity').textContent = `${line.quantity ?? '—'} ${line.unit || ''}`;
+
+  // Ladda befintliga resurser från raden, eller börja tom
+  _calcResources = Array.isArray(line._resources) ? JSON.parse(JSON.stringify(line._resources)) : [];
+
+  if (_calcResources.length === 0) {
+    addCalcRow();
+  } else {
+    renderCalcRows();
+    await recalcCalc();
+  }
+
+  document.getElementById('calcModal').hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeCalcModal() {
+  document.getElementById('calcModal').hidden = true;
+  document.body.style.overflow = '';
+  _calcLineIndex = null;
+  _calcResources = [];
+}
+
+function addCalcRow() {
+  _calcResources.push({
+    resource_id: '',
+    factor: 1,
+    spill: 0,
+    time: 0,
+    quantity: 1,
+    cost_per_unit: 0,
+  });
+  renderCalcRows();
+}
+
+function renderCalcRows() {
+  const tbody = document.getElementById('calcResourcesBody');
+  if (!tbody) return;
+
+  if (_calcResources.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="calc-row-empty">Inga resurser. Klicka "+ Lägg till resurs".</td></tr>';
+    return;
+  }
+
+  const optionsHtml = _resourceCache.map((r) =>
+    `<option value="${escapeAttr(r.id)}" data-cost="${r.cost_per_unit}">${escapeHtml(r.name)} (${escapeHtml(r.unit)})</option>`
+  ).join('');
+
+  tbody.innerHTML = _calcResources.map((r, i) => {
+    const selectedId = r.resource_id || '';
+    const cost = r.cost_per_unit || 0;
+    return `
+      <tr data-calc-index="${i}">
+        <td>
+          <select class="calc-cell-select" data-field="resource_id" data-index="${i}">
+            <option value="">— Välj resurs —</option>
+            ${optionsHtml.replace(`value="${escapeAttr(selectedId)}"`, `value="${escapeAttr(selectedId)}" selected`)}
+          </select>
+        </td>
+        <td class="col-num"><input type="number" step="0.01" class="calc-cell-input num" data-field="factor" data-index="${i}" value="${r.factor}" /></td>
+        <td class="col-num"><input type="number" step="0.01" class="calc-cell-input num" data-field="spill" data-index="${i}" value="${r.spill}" /></td>
+        <td class="col-num"><input type="number" step="0.01" class="calc-cell-input num" data-field="time" data-index="${i}" value="${r.time}" /></td>
+        <td class="col-num"><input type="number" step="0.01" class="calc-cell-input num" data-field="quantity" data-index="${i}" value="${r.quantity}" /></td>
+        <td class="col-num"><span class="mono" data-cost-per-unit-for="${i}">${fmtSEK.format(cost)} kr</span></td>
+        <td class="col-num"><span class="calc-cost" data-row-cost-for="${i}">—</span></td>
+        <td class="col-action">
+          <button type="button" class="mf-row-delete" data-action="delete-calc" data-index="${i}" title="Ta bort">✕</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('.calc-cell-input, .calc-cell-select').forEach((el) => {
+    el.addEventListener('input', onCalcFieldChange);
+    el.addEventListener('change', onCalcFieldChange);
+  });
+  tbody.querySelectorAll('[data-action="delete-calc"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.index, 10);
+      _calcResources.splice(idx, 1);
+      renderCalcRows();
+      recalcCalc();
+    });
+  });
+}
+
+async function onCalcFieldChange(e) {
+  const el = e.target;
+  const field = el.dataset.field;
+  const idx = parseInt(el.dataset.index, 10);
+  if (Number.isNaN(idx)) return;
+  const r = _calcResources[idx];
+  if (!r) return;
+
+  if (field === 'resource_id') {
+    r.resource_id = el.value;
+    const selected = _resourceCache.find((x) => x.id === el.value);
+    r.cost_per_unit = selected ? selected.cost_per_unit : 0;
+    const cell = document.querySelector(`[data-cost-per-unit-for="${idx}"]`);
+    if (cell) cell.textContent = `${fmtSEK.format(r.cost_per_unit)} kr`;
+  } else {
+    const raw = el.value.trim();
+    r[field] = raw === '' ? 0 : Number(raw);
+  }
+  await recalcCalc();
+}
+
+async function recalcCalc() {
+  const line = mfEditorState.parsedMf?.lines[_calcLineIndex];
+  const lineQty = line?.quantity;
+
+  try {
+    const res = await fetch('/api/resources/calculate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resources: _calcResources,
+        line_quantity: lineQty,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+
+    document.getElementById('calcTotalCost').textContent = `${fmtSEK.format(d.total_cost || 0)} kr`;
+    document.getElementById('calcUnitPrice').textContent = d.unit_price != null
+      ? `${fmtSEK.format(d.unit_price)} kr / ${line.unit || 'st'}`
+      : '—';
+
+    // Uppdatera per-rad kostnad
+    (d.resources || []).forEach((er, i) => {
+      const cell = document.querySelector(`[data-row-cost-for="${i}"]`);
+      if (cell) cell.textContent = `${fmtSEK.format(er.calculated_cost || 0)} kr`;
+    });
+  } catch (e) {
+    console.warn('Calc error:', e);
+  }
+}
+
+async function applyCalcToLine() {
+  if (_calcLineIndex == null || !mfEditorState.parsedMf) return;
+  const line = mfEditorState.parsedMf.lines[_calcLineIndex];
+  if (!line) return;
+
+  // Slutgiltig beräkning
+  try {
+    const res = await fetch('/api/resources/calculate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resources: _calcResources,
+        line_quantity: line.quantity,
+      }),
+    });
+    const d = await res.json();
+
+    if (d.unit_price != null) {
+      line.unit_price = d.unit_price;
+      if (line.quantity != null) {
+        line.total_amount = round2(line.quantity * d.unit_price);
+      }
+    }
+    // Spara resurserna på raden så de återanvänds
+    line._resources = _calcResources;
+
+    mfEditorState.dirty = true;
+    renderMfEditorRows();
+    updateMfTotals();
+    updateMfDirtyState();
+    scheduleAutosave();
+  } catch (e) {
+    alert(`Fel: ${e.message}`);
+    return;
+  }
+
+  closeCalcModal();
 }
 
 // ---------- HELPERS ------------------------------------------------------
