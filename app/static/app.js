@@ -14,6 +14,7 @@ const ROUTES = {
   '#/start':              { tab: 'agent',       view: 'start',         crumb: 'Start',                   handler: renderStart },
   '#/agent/ue':           { tab: 'agent',       view: 'agent-ue',      crumb: 'Agent / UE-mejl',         handler: renderUePage },
   '#/kunskapsbas':        { tab: 'kunskapsbas', view: 'kunskapsbas',   crumb: 'Kunskapsbas',             handler: renderKunskapsbas },
+  '#/kalkylator':         { tab: 'kalkylator',  view: 'kalkylator',    crumb: 'Kalkylator',              handler: renderKalkylatorEmpty },
   '#/dashboard':          { tab: 'anbud',       view: 'dashboard',     crumb: 'Översikt',                handler: renderDashboard },
   '#/upload':             { tab: 'anbud',       view: 'upload',        crumb: 'Anbud / nytt',            handler: renderUpload },
   '#/bids/active':        { tab: 'anbud',       view: 'bids-active',   crumb: 'Anbud / pågående',        handler: renderActiveBids },
@@ -41,22 +42,30 @@ const ROUTES = {
 function navigate() {
   const hash = location.hash || '#/start';
 
-  // Dynamisk route: #/anbud/edit/{case_id}
+  // Dynamisk route: #/anbud/edit/{case_id} — redirect till kalkylator
   const editMatch = hash.match(/^#\/anbud\/edit\/(.+)$/);
   if (editMatch) {
-    const caseId = decodeURIComponent(editMatch[1]);
+    const caseId = editMatch[1];
+    location.hash = `#/kalkylator/${caseId}`;
+    return;
+  }
+
+  // Dynamisk route: #/kalkylator/{case_id}
+  const kalkMatch = hash.match(/^#\/kalkylator\/(.+)$/);
+  if (kalkMatch) {
+    const caseId = decodeURIComponent(kalkMatch[1]);
     document.querySelectorAll('.view').forEach((v) => v.hidden = true);
-    const viewEl = document.querySelector('[data-view="start"]');
+    const viewEl = document.querySelector('[data-view="kalkylator"]');
     if (viewEl) viewEl.hidden = false;
     document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
-    document.querySelector('.tab[data-tab="anbud"]')?.classList.add('active');
+    document.querySelector('.tab[data-tab="kalkylator"]')?.classList.add('active');
     document.querySelectorAll('.sidebar-section').forEach((s) => s.hidden = true);
-    const sb = document.querySelector('.sidebar-section[data-sidebar="anbud"]');
+    const sb = document.querySelector('.sidebar-section[data-sidebar="kalkylator"]');
     if (sb) sb.hidden = false;
     document.querySelectorAll('.sidebar-link').forEach((el) => el.classList.remove('active'));
     document.querySelectorAll('.sidebar.open').forEach((s) => s.classList.remove('open'));
     window.scrollTo({ top: 0 });
-    loadCaseInEditor(caseId);
+    renderKalkylatorForCase(caseId);
     return;
   }
 
@@ -930,8 +939,8 @@ function switchAgentMode(mode) {
     if (dp) dp.hidden = true;
     const banner = document.getElementById('caseCreatedBanner');
     if (banner) banner.hidden = true;
-    const mfPanel = document.getElementById('mfEditorPanel');
-    if (mfPanel) mfPanel.hidden = true;
+    const redirect = document.getElementById('mfEditorRedirect');
+    if (redirect) redirect.hidden = true;
     const insights = document.getElementById('insightsPanel');
     if (insights) insights.hidden = true;
     if (typeof hideUploadProgress === 'function') hideUploadProgress();
@@ -1141,16 +1150,21 @@ function renderMultiAgentResult(data) {
     showCaseBanner(firstResult.saved_case, firstResult.analysis);
     renderInsights(firstResult.saved_case.insights);
     loadDraftPanel(firstCaseId);
-    if (firstResult.analysis?.summary?.has_mf) {
-      loadMfEditor(firstCaseId);
-    } else {
-      document.getElementById('mfEditorPanel').hidden = true;
+
+    const redirect = document.getElementById('mfEditorRedirect');
+    if (redirect) {
+      redirect.hidden = !firstResult.analysis?.summary?.has_mf;
+      const btn = document.getElementById('openKalkylatorBtn');
+      if (btn) {
+        btn.onclick = () => { location.hash = `#/kalkylator/${encodeURIComponent(firstCaseId)}`; };
+      }
     }
   } else {
     document.getElementById('caseCreatedBanner').hidden = true;
     document.getElementById('insightsPanel').hidden = true;
     document.getElementById('draftPanel').hidden = true;
-    document.getElementById('mfEditorPanel').hidden = true;
+    const redirect = document.getElementById('mfEditorRedirect');
+    if (redirect) redirect.hidden = true;
     agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
@@ -1246,16 +1260,22 @@ function renderAgentResult(analysis, savedCase) {
     showCaseBanner(savedCase, analysis);
     renderInsights(savedCase.insights);
     loadDraftPanel(savedCase.id);
-    if (analysis.summary?.has_mf) {
-      loadMfEditor(savedCase.id);
-    } else {
-      document.getElementById('mfEditorPanel').hidden = true;
+
+    // Visa "öppna kalkylator"-redirect istället för att ladda MF-editorn inline
+    const redirect = document.getElementById('mfEditorRedirect');
+    if (redirect) {
+      redirect.hidden = !analysis.summary?.has_mf;
+      const btn = document.getElementById('openKalkylatorBtn');
+      if (btn) {
+        btn.onclick = () => { location.hash = `#/kalkylator/${encodeURIComponent(savedCase.id)}`; };
+      }
     }
   } else {
     document.getElementById('caseCreatedBanner').hidden = true;
     document.getElementById('insightsPanel').hidden = true;
     document.getElementById('draftPanel').hidden = true;
-    document.getElementById('mfEditorPanel').hidden = true;
+    const redirect = document.getElementById('mfEditorRedirect');
+    if (redirect) redirect.hidden = true;
     agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
@@ -1952,6 +1972,260 @@ function downloadCaseMfCsv(caseId) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+// ---------- KALKYLATOR ----------------------------------------------------
+
+const KALK_RECENT_KEY = 'lodet:kalkylator:recent';
+let _kalkCurrentCase = null;
+
+async function renderKalkylatorEmpty() {
+  document.getElementById('kalkylatorEmpty').hidden = false;
+  document.getElementById('kalkylatorCase').hidden = true;
+  renderKalkylatorRecent();
+
+  const listEl = document.getElementById('kalkylatorCaseList');
+  listEl.innerHTML = '<div class="empty-state"><p>Laddar anbud …</p></div>';
+
+  try {
+    const res = await fetch('/api/cases');
+    const d = await res.json();
+    const cases = d.cases || [];
+
+    if (cases.length === 0) {
+      listEl.innerHTML = '<div class="empty-state"><p>Inga anbud än. Ladda upp ett förfrågningsunderlag via <a href="#/start">Agent-tabben</a>.</p></div>';
+      return;
+    }
+
+    listEl.innerHTML = cases.map((c) => `
+      <div class="bid-row" data-case-id="${escapeHtml(c.id)}">
+        <div>
+          <div class="bid-name">${escapeHtml(c.project_name || c.source_name || '—')}</div>
+          <div class="bid-meta">${escapeHtml(c.document_number || '')} ${c.document_number ? '· ' : ''}${c.file_count} filer · ${c.required_count || 0} krav</div>
+        </div>
+        <div class="bid-amount">${c.total_amount_sek ? fmtSEK.format(c.total_amount_sek) + ' kr' : '—'}</div>
+        <div class="bid-date">${formatRelDate(c.created_at)}</div>
+        <div></div>
+      </div>
+    `).join('');
+
+    listEl.querySelectorAll('.bid-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        location.hash = `#/kalkylator/${encodeURIComponent(row.dataset.caseId)}`;
+      });
+    });
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+function _addKalkRecent(caseId, projectName) {
+  try {
+    const list = JSON.parse(localStorage.getItem(KALK_RECENT_KEY) || '[]');
+    const filtered = list.filter((x) => x.id !== caseId);
+    filtered.unshift({ id: caseId, name: projectName || caseId, opened_at: Date.now() });
+    localStorage.setItem(KALK_RECENT_KEY, JSON.stringify(filtered.slice(0, 8)));
+  } catch {}
+}
+
+function renderKalkylatorRecent() {
+  const el = document.getElementById('kalkylatorRecent');
+  if (!el) return;
+  try {
+    const list = JSON.parse(localStorage.getItem(KALK_RECENT_KEY) || '[]');
+    if (list.length === 0) {
+      el.innerHTML = '<p class="sidebar-empty">Inga anbud öppna</p>';
+      return;
+    }
+    el.innerHTML = list.map((c) => `
+      <a class="sidebar-recent-item" data-route="#/kalkylator/${encodeURIComponent(c.id)}" title="${escapeAttr(c.name)}">${escapeHtml(c.name)}</a>
+    `).join('');
+  } catch {
+    el.innerHTML = '<p class="sidebar-empty">Inga anbud öppna</p>';
+  }
+}
+
+async function renderKalkylatorForCase(caseId) {
+  document.getElementById('kalkylatorEmpty').hidden = true;
+  document.getElementById('kalkylatorCase').hidden = false;
+
+  // Reset alla sub-tabbar till default (MF)
+  document.querySelectorAll('.kalkylator-subtabs .subtab').forEach((b) => b.classList.remove('active'));
+  document.querySelector('.kalkylator-subtabs .subtab[data-subtab="mf"]')?.classList.add('active');
+  document.querySelectorAll('.kalkylator-pane').forEach((p) => p.hidden = p.dataset.pane !== 'mf');
+
+  // Bind sub-tab-byten (idempotent)
+  document.querySelectorAll('.kalkylator-subtabs .subtab').forEach((btn) => {
+    if (!btn._bound) {
+      btn.addEventListener('click', () => switchKalkylatorTab(btn.dataset.subtab));
+      btn._bound = true;
+    }
+  });
+
+  // Default visa "laddar"
+  document.getElementById('kalkylatorProjectName').textContent = 'Laddar …';
+  document.getElementById('kalkylatorMeta').textContent = '';
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}`);
+    if (!res.ok) throw new Error(res.status === 404 ? 'Anbudet hittades inte' : `HTTP ${res.status}`);
+    const c = await res.json();
+    _kalkCurrentCase = c;
+
+    document.getElementById('kalkylatorProjectName').textContent = c.project_name || c.source_name || c.id;
+    const metaParts = [];
+    if (c.document_number) metaParts.push(c.document_number);
+    if (c.customer) metaParts.push(c.customer);
+    if (c.created_at) metaParts.push(`skapad ${formatRelDate(c.created_at)}`);
+    document.getElementById('kalkylatorMeta').textContent = metaParts.join(' · ') || '—';
+
+    _addKalkRecent(caseId, c.project_name || c.source_name);
+    renderKalkylatorRecent();
+
+    // Stats
+    const parsed = c.parsed_mf || {};
+    const lines = parsed.lines || [];
+    const total = (parsed.metadata || {}).total_amount_sek || c.total_amount_sek;
+    const priced = lines.filter((l) => l.unit_price != null).length;
+    const amaCodes = new Set(lines.map((l) => l.ama_code).filter(Boolean));
+
+    document.getElementById('kalkStatTotal').textContent = total ? `${fmtSEK.format(total)} kr` : '0 kr';
+    document.getElementById('kalkStatLines').textContent = lines.length || '—';
+    document.getElementById('kalkStatPriced').textContent = lines.length ? `${priced} / ${lines.length}` : '—';
+    document.getElementById('kalkStatAma').textContent = amaCodes.size || '—';
+
+    // "Öppna i Agent"-knapp
+    document.getElementById('kalkylatorAgentBtn').onclick = () => { location.hash = '#/start'; };
+
+    // Mängdförteckning-pane
+    if (c.parsed_mf) {
+      document.getElementById('mfEditorPanel').hidden = false;
+      document.getElementById('kalkylatorNoMf').hidden = true;
+      loadMfEditor(caseId);
+    } else {
+      document.getElementById('mfEditorPanel').hidden = true;
+      document.getElementById('kalkylatorNoMf').hidden = false;
+    }
+
+    // Info-pane
+    renderKalkylatorInfo(c);
+
+    // Aprisberäkningar
+    renderAprisOverview(c);
+
+    // Notes
+    renderKalkylatorNotes(caseId);
+  } catch (e) {
+    document.getElementById('kalkylatorProjectName').textContent = 'Fel';
+    document.getElementById('kalkylatorMeta').textContent = e.message;
+  }
+}
+
+function switchKalkylatorTab(tab) {
+  document.querySelectorAll('.kalkylator-subtabs .subtab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.subtab === tab);
+  });
+  document.querySelectorAll('.kalkylator-pane').forEach((p) => {
+    p.hidden = p.dataset.pane !== tab;
+  });
+}
+
+function renderKalkylatorInfo(c) {
+  const grid = document.getElementById('kalkylatorInfoGrid');
+  if (!grid) return;
+  const items = [
+    { label: 'Projekt',         value: c.project_name || '—' },
+    { label: 'Dokumentnummer',  value: c.document_number || '—' },
+    { label: 'Beställare',      value: c.customer || '—' },
+    { label: 'Källa',           value: `${c.source || '—'}: ${c.source_name || ''}` },
+    { label: 'Skapad',          value: c.created_at || '—' },
+    { label: 'Filer i paketet', value: (c.files || []).length },
+    { label: 'Krav i anbudet',  value: (c.required_docs || []).length },
+    { label: 'Utkast skapade',  value: Object.keys(c.drafts || {}).length },
+    { label: 'Lärdomar',        value: (c.lessons || []).length },
+    { label: 'Totalsumma',      value: c.total_amount_sek ? `${fmtSEK.format(c.total_amount_sek)} kr` : '0 kr' },
+  ];
+  grid.innerHTML = items.map((it) => `
+    <div class="kalkylator-info-item">
+      <span class="kalkylator-info-label">${escapeHtml(it.label)}</span>
+      <span class="kalkylator-info-value">${escapeHtml(String(it.value))}</span>
+    </div>
+  `).join('');
+}
+
+function renderAprisOverview(c) {
+  const listEl = document.getElementById('aprisList');
+  const meta = document.getElementById('aprisSummaryMeta');
+  if (!listEl) return;
+
+  const lines = (c.parsed_mf || {}).lines || [];
+  const withResources = lines
+    .map((l, i) => ({ line: l, index: i }))
+    .filter((x) => Array.isArray(x.line._resources) && x.line._resources.length > 0);
+
+  meta.textContent = `${withResources.length} av ${lines.length} rader har resurs-baserad kalkyl`;
+
+  if (withResources.length === 0) {
+    listEl.innerHTML = '<div class="empty-state"><p>Inga rader har resurs-baserad à-prisberäkning än.</p><p class="muted small">Klicka <strong>∑</strong> på en rad i mängdförteckningen för att börja räkna.</p></div>';
+    return;
+  }
+
+  listEl.innerHTML = withResources.map(({ line, index }) => {
+    const resCount = line._resources.length;
+    return `
+      <div class="bid-row" data-line-index="${index}">
+        <div>
+          <div class="bid-name">${escapeHtml(line.ama_code || '—')} · ${escapeHtml(line.description?.slice(0, 60) || '')}</div>
+          <div class="bid-meta">${resCount} resurs${resCount === 1 ? '' : 'er'} · ${line.quantity || '—'} ${line.unit || ''}</div>
+        </div>
+        <div class="bid-amount">${line.unit_price != null ? fmtSEK.format(line.unit_price) + ' kr/' + (line.unit || 'st') : '—'}</div>
+        <div class="bid-date">${line.total_amount != null ? fmtSEK.format(line.total_amount) + ' kr' : '—'}</div>
+        <div></div>
+      </div>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.bid-row').forEach((row) => {
+    row.addEventListener('click', () => {
+      const idx = parseInt(row.dataset.lineIndex, 10);
+      switchKalkylatorTab('mf');
+      setTimeout(() => openCalcModal(idx), 100);
+    });
+  });
+}
+
+function renderKalkylatorNotes(caseId) {
+  const ta = document.getElementById('kalkylatorNotes');
+  const status = document.getElementById('notesStatus');
+  const savedAt = document.getElementById('notesSavedAt');
+  if (!ta) return;
+
+  const key = `lodet:notes:${caseId}`;
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) || 'null');
+    if (stored) {
+      ta.value = stored.text || '';
+      if (stored.saved_at) savedAt.textContent = `Sparat ${formatRelDate(stored.saved_at)}`;
+    } else {
+      ta.value = '';
+      savedAt.textContent = '';
+    }
+  } catch {}
+
+  const saveBtn = document.getElementById('saveNotesBtn');
+  saveBtn.onclick = () => {
+    const text = ta.value;
+    try {
+      localStorage.setItem(key, JSON.stringify({ text, saved_at: new Date().toISOString() }));
+      status.textContent = 'Sparat ✓';
+      status.style.color = 'var(--salvia)';
+      savedAt.textContent = 'Sparat just nu';
+      setTimeout(() => { status.textContent = ''; }, 1500);
+    } catch (e) {
+      status.textContent = `Fel: ${e.message}`;
+      status.style.color = 'var(--tegel)';
+    }
+  };
 }
 
 // ---------- ÖPPNA BEFINTLIGT ANBUD I EDITORN ---------------------------

@@ -2767,6 +2767,143 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
 }
 
 /* ========================================================================
+   KALKYLATOR-VY (Anbudskalkyl i BidCon-stil)
+   ======================================================================== */
+.view-kalkylator { padding-top: 0; }
+
+.kalkylator-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.kalkylator-head-text { min-width: 0; flex: 1; }
+
+.kalkylator-head h1 {
+  font-family: var(--font-serif);
+  font-size: 1.9rem;
+  color: var(--lodbla);
+  margin: 0 0 4px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.kalkylator-meta {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.kalkylator-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.kalkylator-subtabs {
+  display: flex;
+  border-bottom: 1px solid var(--linjegra);
+  margin-bottom: 18px;
+  overflow-x: auto;
+}
+
+.kalkylator-subtabs .subtab {
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 10px 18px;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.12s;
+  white-space: nowrap;
+}
+
+.kalkylator-subtabs .subtab:hover { color: var(--jarn); }
+.kalkylator-subtabs .subtab.active { color: var(--lodbla); }
+.kalkylator-subtabs .subtab.active::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--lodbla);
+  border-radius: 1px;
+}
+
+.kalkylator-pane[hidden] { display: none; }
+
+.kalkylator-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  padding: 20px;
+}
+
+.kalkylator-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kalkylator-info-label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.kalkylator-info-value {
+  font-size: 0.95rem;
+  color: var(--jarn);
+  font-weight: 500;
+}
+
+.kalkylator-empty .panel { margin-top: 24px; }
+
+/* MF-editor-redirect (visas i agent-vyn istället för MF-editor) */
+.mf-editor-redirect {
+  background: linear-gradient(135deg, #FFFEF8 0%, var(--krita) 100%);
+  border-color: var(--ockra);
+}
+
+.mf-editor-redirect-body {
+  padding: 28px 26px;
+  text-align: center;
+}
+
+.mf-editor-redirect-body .eyebrow {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.mf-editor-redirect-title {
+  font-family: var(--font-serif);
+  font-size: 1.3rem;
+  font-weight: 500;
+  color: var(--lodbla);
+  margin: 0 0 8px;
+}
+
+.mf-editor-redirect-text {
+  color: var(--muted);
+  margin: 0 auto 16px;
+  max-width: 480px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+/* ========================================================================
    À-PRIS-KALKYL (resurser per MF-rad)
    ======================================================================== */
 .mf-row-calc {

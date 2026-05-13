@@ -24,6 +24,7 @@
       <nav class="topbar-tabs" id="topbarTabs">
         <a class="tab" data-tab="agent" data-route="#/start">Agent</a>
         <a class="tab" data-tab="anbud" data-route="#/dashboard">Anbud</a>
+        <a class="tab" data-tab="kalkylator" data-route="#/kalkylator">Kalkylator</a>
         <a class="tab" data-tab="bibliotek" data-route="#/ama/anlaggning">Bibliotek</a>
         <a class="tab" data-tab="kunskapsbas" data-route="#/kunskapsbas">Kunskapsbas</a>
         <a class="tab" data-tab="inst" data-route="#/inst/foretag">Inställningar</a>
@@ -117,6 +118,25 @@
             <span class="sidebar-link-icon">⌗</span>
             <span>Historik</span>
           </a>
+        </div>
+
+        <!-- KALKYLATOR-TAB -->
+        <div class="sidebar-section" data-sidebar="kalkylator" hidden>
+          <p class="sidebar-label">Kalkylator</p>
+          <a class="sidebar-link" data-route="#/kalkylator">
+            <span class="sidebar-link-icon">∑</span>
+            <span>Alla anbud</span>
+          </a>
+          <a class="sidebar-link" data-route="#/inst/resurser">
+            <span class="sidebar-link-icon">·</span>
+            <span>Resursbibliotek</span>
+          </a>
+
+          <div class="sidebar-divider"></div>
+          <p class="sidebar-label sidebar-label-small">Senast öppna</p>
+          <div class="sidebar-recent" id="kalkylatorRecent">
+            <p class="sidebar-empty">Inga anbud öppna</p>
+          </div>
         </div>
 
         <!-- BIBLIOTEK-TAB -->
@@ -374,46 +394,12 @@
                 <div id="agentRecs" class="agent-recs"></div>
               </div>
 
-              <div id="mfEditorPanel" class="panel mf-editor-panel" hidden>
-                <div class="panel-head">
-                  <h2>Steg 1 · Mängdförteckning</h2>
-                  <span class="muted small" id="mfEditorMeta"></span>
-                </div>
-                <div class="draft-intro">
-                  <p class="draft-intro-text">Grundstommen i anbudet. Fyll i <strong>à-pris</strong> per rad — belopp och totalsumma uppdateras live. Auto-sparas 1.5 sekund efter senaste tangent. När du är klar med priserna är anbudssumman, sekretessen och missivet bara avskärmningar i Steg 2.</p>
-                </div>
-                <div class="mf-editor-toolbar">
-                  <div class="mf-grand-total">
-                    <span class="mf-grand-total-label">Totalsumma exkl. moms</span>
-                    <span class="mf-grand-total-value" id="mfGrandTotal">—</span>
-                    <span class="mf-grand-total-dirty" id="mfDirtyMark" hidden>· ej sparat</span>
-                  </div>
-                  <div class="mf-editor-actions">
-                    <span class="mf-autosave-status muted small" id="mfAutosaveStatus"></span>
-                    <button type="button" class="btn btn-ghost btn-sm" id="mfRevertBtn">Återställ</button>
-                    <button type="button" class="btn btn-ghost btn-sm" id="mfCsvBtn">Hämta CSV</button>
-                    <button type="button" class="btn btn-ghost btn-sm" id="mfExcelBtn">Hämta Excel</button>
-                    <button type="button" class="btn btn-primary btn-sm" id="mfSaveBtn">Spara</button>
-                  </div>
-                </div>
-                <div class="mf-editor-table-wrap">
-                  <table id="mfEditorTable" class="mf-editor-table">
-                    <thead>
-                      <tr>
-                        <th>AMA-kod</th>
-                        <th class="col-desc">Beskrivning</th>
-                        <th class="col-num">Enhet</th>
-                        <th class="col-num">Antal</th>
-                        <th class="col-num">À-pris (kr)</th>
-                        <th class="col-num">Belopp</th>
-                        <th class="col-action"></th>
-                      </tr>
-                    </thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
-                <div class="mf-editor-footer">
-                  <button type="button" class="btn btn-ghost btn-sm" id="mfAddRowBtn">+ Ny rad</button>
+              <div id="mfEditorRedirect" class="panel mf-editor-redirect" hidden>
+                <div class="mf-editor-redirect-body">
+                  <p class="eyebrow">Steg 1 · Mängdförteckning</p>
+                  <h3 class="mf-editor-redirect-title">Redigera priser i kalkylatorn</h3>
+                  <p class="mf-editor-redirect-text">Mängdförteckningen redigeras i den dedikerade kalkylatorn där du har stats, sub-tabbar och à-prisberäkning via resursbiblioteket.</p>
+                  <button type="button" class="btn btn-primary" id="openKalkylatorBtn">Öppna kalkylator →</button>
                 </div>
               </div>
 
@@ -441,6 +427,146 @@
               </div>
             </div>
 
+          </section>
+
+          <!-- =================== KALKYLATOR =================== -->
+          <section class="view view-kalkylator" data-view="kalkylator" hidden>
+            <div class="kalkylator-empty" id="kalkylatorEmpty" hidden>
+              <div class="page-head">
+                <p class="eyebrow">Kalkylator</p>
+                <h1>Välj ett anbud att kalkylera</h1>
+                <p class="lede">Öppna ett befintligt anbud nedan, eller ladda upp ett nytt förfrågningsunderlag via Agent-tabben för att skapa ett nytt.</p>
+              </div>
+              <div class="panel">
+                <div class="panel-head"><h2>Pågående anbud</h2></div>
+                <div id="kalkylatorCaseList" class="bid-list"></div>
+              </div>
+            </div>
+
+            <div class="kalkylator-case" id="kalkylatorCase" hidden>
+              <div class="kalkylator-head">
+                <div class="kalkylator-head-text">
+                  <p class="eyebrow">Kalkylator</p>
+                  <h1 id="kalkylatorProjectName">—</h1>
+                  <p class="kalkylator-meta" id="kalkylatorMeta">—</p>
+                </div>
+                <div class="kalkylator-head-actions">
+                  <button type="button" class="btn btn-ghost btn-sm" id="kalkylatorAgentBtn">↗ Öppna i Agent</button>
+                </div>
+              </div>
+
+              <div class="kalkylator-stats">
+                <div class="stat-card">
+                  <span class="stat-icon" data-color="lodbla">∑</span>
+                  <span class="stat-label">Totalsumma</span>
+                  <span class="stat-value" id="kalkStatTotal">—</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-icon" data-color="ockra">▦</span>
+                  <span class="stat-label">Antal rader</span>
+                  <span class="stat-value" id="kalkStatLines">—</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-icon" data-color="salvia">✓</span>
+                  <span class="stat-label">Prissatta</span>
+                  <span class="stat-value" id="kalkStatPriced">—</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-icon" data-color="tegel">⊟</span>
+                  <span class="stat-label">AMA-koder</span>
+                  <span class="stat-value" id="kalkStatAma">—</span>
+                </div>
+              </div>
+
+              <nav class="kalkylator-subtabs" id="kalkylatorSubtabs">
+                <button type="button" class="subtab active" data-subtab="mf">Mängdförteckning</button>
+                <button type="button" class="subtab" data-subtab="info">Info</button>
+                <button type="button" class="subtab" data-subtab="aprisberakningar">À-prisberäkningar</button>
+                <button type="button" class="subtab" data-subtab="anteckningar">Anteckningar</button>
+              </nav>
+
+              <div class="kalkylator-pane" data-pane="mf">
+                <div id="mfEditorPanel" class="panel mf-editor-panel" hidden>
+                  <div class="panel-head">
+                    <h2>Mängdförteckning</h2>
+                    <span class="muted small" id="mfEditorMeta"></span>
+                  </div>
+                  <div class="draft-intro">
+                    <p class="draft-intro-text">Fyll i <strong>à-pris</strong> per rad — belopp och totalsumma uppdateras live. Auto-sparas 1.5 sekund efter senaste tangent. Klicka <strong>∑</strong> på en rad för att räkna à-priset från resurser i biblioteket.</p>
+                  </div>
+                  <div class="mf-editor-toolbar">
+                    <div class="mf-grand-total">
+                      <span class="mf-grand-total-label">Totalsumma exkl. moms</span>
+                      <span class="mf-grand-total-value" id="mfGrandTotal">—</span>
+                      <span class="mf-grand-total-dirty" id="mfDirtyMark" hidden>· ej sparat</span>
+                    </div>
+                    <div class="mf-editor-actions">
+                      <span class="mf-autosave-status muted small" id="mfAutosaveStatus"></span>
+                      <button type="button" class="btn btn-ghost btn-sm" id="mfRevertBtn">Återställ</button>
+                      <button type="button" class="btn btn-ghost btn-sm" id="mfCsvBtn">Hämta CSV</button>
+                      <button type="button" class="btn btn-ghost btn-sm" id="mfExcelBtn">Hämta Excel</button>
+                      <button type="button" class="btn btn-primary btn-sm" id="mfSaveBtn">Spara</button>
+                    </div>
+                  </div>
+                  <div class="mf-editor-table-wrap">
+                    <table id="mfEditorTable" class="mf-editor-table">
+                      <thead>
+                        <tr>
+                          <th>AMA-kod</th>
+                          <th class="col-desc">Beskrivning</th>
+                          <th class="col-num">Enhet</th>
+                          <th class="col-num">Antal</th>
+                          <th class="col-num">À-pris (kr)</th>
+                          <th class="col-num">Belopp</th>
+                          <th class="col-action"></th>
+                        </tr>
+                      </thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                  <div class="mf-editor-footer">
+                    <button type="button" class="btn btn-ghost btn-sm" id="mfAddRowBtn">+ Ny rad</button>
+                  </div>
+                </div>
+                <div id="kalkylatorNoMf" class="empty-state" hidden>
+                  <p>Ingen mängdförteckning hittades i paketet.</p>
+                  <p class="muted small">Excel- och CSV-MF parsas automatiskt. För PDF-MF: konvertera till Excel och ladda upp paketet på nytt.</p>
+                </div>
+              </div>
+
+              <div class="kalkylator-pane" data-pane="info" hidden>
+                <div class="panel">
+                  <div class="panel-head"><h2>Anbudsmeta</h2></div>
+                  <div class="kalkylator-info-grid" id="kalkylatorInfoGrid"></div>
+                </div>
+              </div>
+
+              <div class="kalkylator-pane" data-pane="aprisberakningar" hidden>
+                <div class="panel">
+                  <div class="panel-head">
+                    <h2>À-prisberäkningar</h2>
+                    <span class="muted small" id="aprisSummaryMeta"></span>
+                  </div>
+                  <div id="aprisList" class="bid-list"></div>
+                </div>
+              </div>
+
+              <div class="kalkylator-pane" data-pane="anteckningar" hidden>
+                <div class="panel">
+                  <div class="panel-head">
+                    <h2>Anteckningar</h2>
+                    <span class="muted small" id="notesSavedAt"></span>
+                  </div>
+                  <div style="padding: 18px 20px;">
+                    <textarea id="kalkylatorNotes" class="modal-textarea" style="min-height: 240px;" placeholder="Fri-text-anteckningar om kalkylen, antaganden, frågor till beställaren …"></textarea>
+                    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+                      <span class="muted small" id="notesStatus"></span>
+                      <button type="button" class="btn btn-primary btn-sm" id="saveNotesBtn">Spara anteckningar</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
 
           <!-- =================== UE-MEJL =================== -->
