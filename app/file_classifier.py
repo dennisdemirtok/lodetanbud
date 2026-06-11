@@ -69,8 +69,11 @@ def classify(filename: str, content: bytes | None = None, content_text: str = ""
     fname_no_ext = re.sub(r"\.[^.]+$", "", name)
 
     # MF — explicit detection FÖRE alla andra (filnamn kan innehålla
-    # "teknisk beskrivning" eftersom MF ofta levereras kombinerat)
-    if "mangdforteckning" in norm:
+    # "teknisk beskrivning" eftersom MF ofta levereras kombinerat).
+    # "Mängdbeskrivning" är en vanlig synonym (golden set: Lorensberg).
+    # norm kan innehålla mappvägen — MF-mappar som "10. Ej prissatt
+    # Mängdförteckning/" ger signal även när filnamnet saknar den.
+    if "mangdforteckning" in norm or "mangdbeskrivning" in norm:
         if norm.endswith(".csv"):
             return FileKind("mf", "Mängdförteckning", 0.95)
         if norm.endswith((".xlsx", ".xlsm", ".xls")):

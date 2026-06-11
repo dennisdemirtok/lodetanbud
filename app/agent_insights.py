@@ -9,10 +9,7 @@ frågor som behöver besvaras innan utkasten kan färdigställas.
 
 from __future__ import annotations
 
-import json
-import os
-
-from anthropic import APIError, AsyncAnthropic, AuthenticationError
+from app import llm
 
 
 _INSIGHTS_SCHEMA = {
@@ -107,6 +104,7 @@ async def extract_insights(
     package_summary: dict,
     files: list[dict],
     af_text: str,
+    case_id: str | None = None,
 ) -> dict:
     """
     Returnera {observations, questions, vendor_templates} baserat på
@@ -119,44 +117,25 @@ async def extract_insights(
         "vendor_templates": _detect_vendor_templates_heuristic(files),
     }
 
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        return fallback
-
     if not af_text or len(af_text.strip()) < 200:
         return fallback
 
-    try:
-        client = AsyncAnthropic()
-        prompt = _build_prompt(package_summary, files, af_text)
-
-        response = await client.messages.create(
-            model="claude-opus-4-7",
-            max_tokens=3072,
-            system=_INSIGHTS_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-            output_config={
-                "format": {
-                    "type": "json_schema",
-                    "schema": _INSIGHTS_SCHEMA,
-                }
-            },
-        )
-
-        text = next((b.text for b in response.content if b.type == "text"), "")
-        if not text:
-            return fallback
-
-        parsed = json.loads(text)
-        return {
-            "observations": parsed.get("observations") or [],
-            "questions": parsed.get("questions") or [],
-            "vendor_templates": parsed.get("vendor_templates") or fallback["vendor_templates"],
-        }
-
-    except (AuthenticationError, APIError, json.JSONDecodeError, KeyError):
+    parsed, _err = await llm.call_structured(
+        system=_INSIGHTS_SYSTEM,
+        prompt=_build_prompt(package_summary, files, af_text),
+        schema=_INSIGHTS_SCHEMA,
+        purpose="extract_insights",
+        case_id=case_id,
+        max_tokens=3072,
+    )
+    if parsed is None:
         return fallback
-    except Exception:
-        return fallback
+
+    return {
+        "observations": parsed.get("observations") or [],
+        "questions": parsed.get("questions") or [],
+        "vendor_templates": parsed.get("vendor_templates") or fallback["vendor_templates"],
+    }
 
 
 def _build_prompt(package_summary: dict, files: list[dict], af_text: str) -> str:

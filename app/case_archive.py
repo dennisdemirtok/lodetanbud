@@ -41,7 +41,13 @@ def _line_row_to_dict(row: MfLine) -> dict:
         "unit_price": row.unit_price,
         "total_amount": row.total,
         "is_lump_sum": bool(meta.get("is_lump_sum")),
+        "source": row.source,
+        "extraction_method": row.extraction_method,
+        "confidence": row.confidence,
+        "reviewed_by_user": row.reviewed_by_user,
     }
+    if row.original_values:
+        d["original_values"] = row.original_values
     if meta.get("_resources"):
         d["_resources"] = meta["_resources"]
     return d
@@ -59,9 +65,11 @@ def _line_dict_to_row(case_id: str, position: int, line: dict) -> MfLine:
         quantity=line.get("quantity"),
         unit_price=line.get("unit_price"),
         total=line.get("total_amount"),
-        source={"row": line.get("line_number", position)},
-        extraction_method="deterministic",
-        confidence=1.0,
+        source=line.get("source") or {"row": line.get("line_number", position)},
+        extraction_method=line.get("extraction_method") or "deterministic",
+        confidence=float(line.get("confidence") if line.get("confidence") is not None else 1.0),
+        reviewed_by_user=bool(line.get("reviewed_by_user")),
+        original_values=line.get("original_values"),
         meta=meta,
     )
 

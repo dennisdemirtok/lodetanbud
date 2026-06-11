@@ -2767,6 +2767,243 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
 }
 
 /* ========================================================================
+   GRANSKNINGSVY (AP2) — PDF + confidence-färgade rader
+   ======================================================================== */
+.view-granska { padding-top: 0; }
+
+.granska-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.granska-head h1 {
+  font-family: var(--font-serif);
+  font-size: 1.7rem;
+  color: var(--lodbla);
+  margin: 0 0 4px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.granska-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.granska-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.granska-layout.no-pdf { grid-template-columns: 1fr; }
+
+.granska-pdf {
+  position: sticky;
+  top: calc(var(--topbar-h) + 12px);
+  background: var(--krita);
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.granska-pdf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--linjegra);
+  background: var(--bg-sidebar);
+}
+
+.granska-pdf-filename {
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
+
+.granska-pdf-wrap {
+  position: relative;
+  overflow: auto;
+  max-height: calc(100vh - 230px);
+  background: var(--ljusgra);
+}
+
+#granskaPdfCanvas { display: block; }
+
+.granska-highlight {
+  position: absolute;
+  border: 2px solid var(--tegel);
+  background: rgba(184, 87, 46, 0.13);
+  border-radius: 3px;
+  pointer-events: none;
+  transition: left 0.15s, top 0.15s, width 0.15s, height 0.15s;
+}
+
+.granska-rows { min-width: 0; }
+
+.granska-filterbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.granska-filter {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--linjegra);
+  background: var(--krita);
+  color: var(--jarn);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.granska-filter:hover { border-color: var(--lodbla); }
+.granska-filter.active {
+  background: var(--lodbla);
+  color: var(--krita);
+  border-color: var(--lodbla);
+}
+
+#granskaCounts { margin-left: auto; }
+
+.granska-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.granska-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--krita);
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.granska-row:hover { border-color: var(--muted-2); }
+.granska-row.selected {
+  border-color: var(--lodbla);
+  box-shadow: 0 0 0 2px rgba(28, 44, 58, 0.10);
+}
+
+.granska-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.granska-dot[data-bucket="rod"]      { background: var(--tegel); }
+.granska-dot[data-bucket="gul"]      { background: var(--ockra); }
+.granska-dot[data-bucket="gron"]     { background: var(--salvia); }
+.granska-dot[data-bucket="granskad"] { background: var(--lodbla); }
+
+.granska-fields {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.granska-input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--jarn);
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.granska-input:hover { border-color: var(--linjegra); background: var(--krita); }
+.granska-input:focus {
+  border-color: var(--lodbla);
+  background: var(--krita);
+  box-shadow: 0 0 0 2px rgba(28, 44, 58, 0.08);
+}
+.granska-input.mono { font-family: var(--font-mono); }
+.granska-input.num { text-align: right; }
+.granska-desc { flex: 1; min-width: 160px; }
+
+.granska-rowmeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.granska-conf {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.granska-srclabel {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted-2);
+  white-space: nowrap;
+}
+
+.granska-rowactions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.granska-reviewed {
+  color: var(--salvia);
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Review-banner i kalkylatorn */
+.kalkylator-review-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: #F0DDD3;
+  border: 1px solid var(--tegel);
+  border-radius: var(--radius-lg);
+  margin-bottom: 18px;
+}
+
+.kalkylator-review-icon { font-size: 1.2rem; }
+
+.kalkylator-review-text {
+  flex: 1;
+  font-size: 0.92rem;
+  color: var(--jarn);
+}
+
+@media (max-width: 1100px) {
+  .granska-layout { grid-template-columns: 1fr; }
+  .granska-pdf { position: static; }
+  .granska-pdf-wrap { max-height: 50vh; }
+}
+
+/* ========================================================================
    STATE-CHIPS (anbudets läge i statemaskinen)
    ======================================================================== */
 .state-chip {

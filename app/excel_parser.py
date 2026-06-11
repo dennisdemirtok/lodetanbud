@@ -63,7 +63,7 @@ def parse_excel_bytes(data: bytes) -> OfferDocument:
             rows = _read_sheet_rows(ws, max_rows=10_000)
             if not rows:
                 continue
-            doc = _parse_excel_rows(rows)
+            doc = _parse_excel_rows(rows, sheet_name=ws.title)
             # Acceptera bara om vi faktiskt hittade några rader
             if doc.lines:
                 return doc
@@ -171,7 +171,7 @@ def _extract_metadata(rows: list[list[Any]]) -> dict:
     return meta
 
 
-def _parse_excel_rows(rows: list[list[Any]]) -> OfferDocument:
+def _parse_excel_rows(rows: list[list[Any]], sheet_name: str = "") -> OfferDocument:
     meta = _extract_metadata(rows)
     cols = _detect_columns(rows)
     header_row = cols["_header_row"]
@@ -252,6 +252,7 @@ def _parse_excel_rows(rows: list[list[Any]]) -> OfferDocument:
             unit_price=unit_price,
             total_amount=total,
             is_lump_sum=is_lump,
+            source={"sheet": sheet_name, "row": idx},
             raw_row=[_to_str(c) for c in row],
         )
         doc.lines.append(line)

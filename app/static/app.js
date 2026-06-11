@@ -69,6 +69,25 @@ function navigate() {
     return;
   }
 
+  // Dynamisk route: #/granska/{case_id} — granskningsvyn (AP2)
+  const granskaMatch = hash.match(/^#\/granska\/(.+)$/);
+  if (granskaMatch) {
+    const caseId = decodeURIComponent(granskaMatch[1]);
+    document.querySelectorAll('.view').forEach((v) => v.hidden = true);
+    const viewEl = document.querySelector('[data-view="granska"]');
+    if (viewEl) viewEl.hidden = false;
+    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    document.querySelector('.tab[data-tab="kalkylator"]')?.classList.add('active');
+    document.querySelectorAll('.sidebar-section').forEach((s) => s.hidden = true);
+    const sb = document.querySelector('.sidebar-section[data-sidebar="kalkylator"]');
+    if (sb) sb.hidden = false;
+    document.querySelectorAll('.sidebar-link').forEach((el) => el.classList.remove('active'));
+    document.querySelectorAll('.sidebar.open').forEach((s) => s.classList.remove('open'));
+    window.scrollTo({ top: 0 });
+    loadGranska(caseId);
+    return;
+  }
+
   const route = ROUTES[hash] || ROUTES['#/start'];
 
   // Visa rätt view
@@ -957,7 +976,9 @@ async function handlePackageFiles(files) {
   showUploadProgress(files);
 
   const fd = new FormData();
-  for (const f of files) fd.append('files', f);
+  // webkitRelativePath bär mappkontext (t.ex. "10. Mängdförteckning/…")
+  // som klassificeraren använder som signal
+  for (const f of files) fd.append('files', f, f.webkitRelativePath || f.name);
 
   try {
     // Synkron del: uppladdning + case-skapande (< 1 s). Analysen körs som
@@ -1664,6 +1685,19 @@ function showCaseBanner(savedCase, analysis) {
     idEl.title = savedCase.id;
   }
 
+  // Granskningslänk när extraktionen har lågkonfidenta rader (AP2)
+  const reviewLink = document.getElementById('caseBannerReview');
+  if (reviewLink) {
+    const needsReview = savedCase?.state === 'NEEDS_REVIEW';
+    reviewLink.hidden = !needsReview;
+    if (needsReview && savedCase?.id) {
+      reviewLink.onclick = (e) => {
+        e.preventDefault();
+        location.hash = `#/granska/${encodeURIComponent(savedCase.id)}`;
+      };
+    }
+  }
+
   banner.hidden = false;
 }
 
@@ -2142,6 +2176,22 @@ async function renderKalkylatorForCase(caseId) {
     document.getElementById('kalkStatPriced').textContent = lines.length ? `${priced} / ${lines.length}` : '—';
     document.getElementById('kalkStatAma').textContent = amaCodes.size || '—';
 
+    // Granskningsgrind (AP2): export låst tills extraktionen är granskad
+    const needsReview = c.state === 'NEEDS_REVIEW';
+    const reviewBanner = document.getElementById('kalkylatorReviewBanner');
+    if (reviewBanner) {
+      reviewBanner.hidden = !needsReview;
+      const btn = document.getElementById('kalkylatorReviewBtn');
+      if (btn) btn.onclick = () => { location.hash = `#/granska/${encodeURIComponent(caseId)}`; };
+    }
+    ['mfCsvBtn', 'mfExcelBtn'].forEach((id) => {
+      const b = document.getElementById(id);
+      if (b) {
+        b.disabled = needsReview;
+        b.title = needsReview ? 'Granska extraktionen innan export' : '';
+      }
+    });
+
     // "Öppna i Agent"-knapp
     document.getElementById('kalkylatorAgentBtn').onclick = () => { location.hash = '#/start'; };
 
@@ -2254,6 +2304,7 @@ const _EVENT_LABELS = {
   user_edit: 'Redigering',
   draft_updated: 'Utkast uppdaterat',
   migrated_from_json: 'Migrerad från JSON-arkivet',
+  llm_call: 'LLM-anrop',
 };
 
 async function loadCaseTimeline(caseId) {
@@ -3362,6 +3413,320 @@ async function applyCalcToLine() {
   }
 
   closeCalcModal();
+}
+
+// ---------- GRANSKNINGSVY (AP2) ------------------------------------------
+
+let granskaState = {
+  caseId: null,
+  stateLabel: '',
+  lines: [],
+  thresholds: { red: 0.7, yellow: 0.9 },
+  pdfDocument: null,
+  pdf: null,
+  pageNum: 1,
+  pageCount: 0,
+  scale: 1,
+  filter: 'alla',
+  selectedLineId: null,
+};
+
+async function loadGranska(caseId) {
+  granskaState = {
+    ...granskaState,
+    caseId, lines: [], pdf: null, pdfDocument: null,
+    pageNum: 1, pageCount: 0, filter: 'alla', selectedLineId: null,
+  };
+
+  document.getElementById('granskaTitle').textContent = 'Laddar …';
+  document.getElementById('granskaMeta').textContent = '';
+  document.getElementById('granskaRowList').innerHTML = '';
+  document.querySelectorAll('.granska-filter').forEach((b) =>
+    b.classList.toggle('active', b.dataset.filter === 'alla'));
+
+  bindGranskaOnce();
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/review`);
+    if (!res.ok) throw new Error(res.status === 404 ? 'Anbudet hittades inte' : `HTTP ${res.status}`);
+    const d = await res.json();
+
+    granskaState.lines = d.lines || [];
+    granskaState.thresholds = d.thresholds || granskaState.thresholds;
+    granskaState.pdfDocument = d.pdf_document;
+    granskaState.stateLabel = d.state_label || '';
+
+    document.getElementById('granskaTitle').textContent = d.project_name || caseId;
+    updateGranskaMeta();
+    renderGranskaRows();
+
+    const pane = document.getElementById('granskaPdfPane');
+    const layout = document.getElementById('granskaLayout');
+    if (d.pdf_document && window.pdfjsLib) {
+      pane.hidden = false;
+      layout.classList.remove('no-pdf');
+      document.getElementById('granskaPdfFilename').textContent = d.pdf_document.filename;
+      initGranskaPdf(d.pdf_document.url);
+    } else {
+      pane.hidden = true;
+      layout.classList.add('no-pdf');
+    }
+  } catch (e) {
+    document.getElementById('granskaTitle').textContent = 'Fel';
+    document.getElementById('granskaMeta').textContent = e.message;
+  }
+}
+
+function granskaBucket(l) {
+  if (l.reviewed_by_user) return 'granskad';
+  const c = l.confidence == null ? 1 : l.confidence;
+  if (c < granskaState.thresholds.red) return 'rod';
+  if (c < granskaState.thresholds.yellow) return 'gul';
+  return 'gron';
+}
+
+function updateGranskaMeta() {
+  const counts = { rod: 0, gul: 0, gron: 0, granskad: 0 };
+  for (const l of granskaState.lines) counts[granskaBucket(l)]++;
+  document.getElementById('granskaCounts').textContent =
+    `${counts.rod} röda · ${counts.gul} gula · ${counts.gron} gröna · ${counts.granskad} granskade`;
+  const parts = [];
+  if (granskaState.stateLabel) parts.push(granskaState.stateLabel);
+  parts.push(`${granskaState.lines.length} rader`);
+  document.getElementById('granskaMeta').textContent = parts.join(' · ');
+}
+
+function granskaSourceLabel(l) {
+  const src = l.source || {};
+  const llm = l.extraction_method === 'llm' ? ' · LLM' : '';
+  if (src.page) return `s. ${src.page}${llm}`;
+  if (src.sheet) return `${src.sheet} rad ${src.row}${llm}`;
+  if (src.row != null) return `rad ${src.row}${llm}`;
+  return l.extraction_method === 'llm' ? 'LLM' : '';
+}
+
+const _GRANSKA_ORDER = { rod: 0, gul: 1, gron: 2, granskad: 3 };
+
+function renderGranskaRows() {
+  const listEl = document.getElementById('granskaRowList');
+  if (!listEl) return;
+
+  const sorted = [...granskaState.lines].sort((a, b) => {
+    const d = _GRANSKA_ORDER[granskaBucket(a)] - _GRANSKA_ORDER[granskaBucket(b)];
+    return d !== 0 ? d : a.position - b.position;
+  });
+  const visible = granskaState.filter === 'alla'
+    ? sorted
+    : sorted.filter((l) => granskaBucket(l) === granskaState.filter);
+
+  if (visible.length === 0) {
+    listEl.innerHTML = '<div class="empty-state"><p>Inga rader i detta filter.</p></div>';
+    return;
+  }
+
+  listEl.innerHTML = visible.map((l) => {
+    const bucket = granskaBucket(l);
+    const conf = l.reviewed_by_user ? '✓' : `${Math.round((l.confidence ?? 1) * 100)}%`;
+    const selected = l.id === granskaState.selectedLineId ? ' selected' : '';
+    return `
+      <div class="granska-row${selected}" data-line-id="${escapeAttr(l.id)}" data-bucket="${bucket}">
+        <span class="granska-dot" data-bucket="${bucket}" title="${bucket}"></span>
+        <div class="granska-fields">
+          <input class="granska-input mono" data-field="ama_code" value="${escapeAttr(l.ama_code || '')}" placeholder="AMA" style="width:92px" />
+          <input class="granska-input granska-desc" data-field="description" value="${escapeAttr(l.description || '')}" placeholder="Beskrivning" />
+          <input class="granska-input mono" data-field="unit" value="${escapeAttr(l.unit || '')}" placeholder="enh" style="width:54px" />
+          <input class="granska-input mono num" data-field="quantity" value="${l.quantity ?? ''}" placeholder="mängd" style="width:76px" />
+          <input class="granska-input mono num" data-field="unit_price" value="${l.unit_price ?? ''}" placeholder="à-pris" style="width:84px" />
+        </div>
+        <div class="granska-rowmeta">
+          <span class="granska-conf">${conf}</span>
+          <span class="granska-srclabel">${escapeHtml(granskaSourceLabel(l))}</span>
+        </div>
+        <div class="granska-rowactions">
+          <button type="button" class="draft-action primary" data-action="save" hidden>Spara</button>
+          ${l.reviewed_by_user
+            ? '<span class="granska-reviewed">✓ Granskad</span>'
+            : '<button type="button" class="draft-action" data-action="approve">Godkänn</button>'}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.granska-row').forEach((rowEl) => {
+    const lineId = rowEl.dataset.lineId;
+
+    rowEl.addEventListener('click', (e) => {
+      if (e.target.closest('input, button')) return;
+      granskaState.selectedLineId = lineId;
+      listEl.querySelectorAll('.granska-row.selected').forEach((r) => r.classList.remove('selected'));
+      rowEl.classList.add('selected');
+      const line = granskaState.lines.find((x) => x.id === lineId);
+      if (line?.source?.page && granskaState.pdf) {
+        granskaShowPage(line.source.page, line.source.bbox);
+      }
+    });
+
+    rowEl.querySelectorAll('.granska-input').forEach((inp) => {
+      inp.addEventListener('input', () => {
+        const saveBtn = rowEl.querySelector('[data-action="save"]');
+        if (saveBtn) saveBtn.hidden = false;
+      });
+    });
+
+    rowEl.querySelector('[data-action="save"]')?.addEventListener('click', () => {
+      const fields = {};
+      rowEl.querySelectorAll('.granska-input').forEach((inp) => {
+        fields[inp.dataset.field] = inp.value;
+      });
+      granskaSaveLine(lineId, fields);
+    });
+
+    rowEl.querySelector('[data-action="approve"]')?.addEventListener('click', () => {
+      granskaSaveLine(lineId, {});
+    });
+  });
+}
+
+async function granskaSaveLine(lineId, fields) {
+  try {
+    const res = await fetch(
+      `/api/cases/${encodeURIComponent(granskaState.caseId)}/review/lines/${encodeURIComponent(lineId)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+      },
+    );
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+    const d = await res.json();
+    const idx = granskaState.lines.findIndex((x) => x.id === lineId);
+    if (idx >= 0) granskaState.lines[idx] = d.line;
+    updateGranskaMeta();
+    renderGranskaRows();
+  } catch (e) {
+    alert(`Kunde inte spara: ${e.message}`);
+  }
+}
+
+function bindGranskaOnce() {
+  const approveBtn = document.getElementById('granskaApproveGreens');
+  if (approveBtn && !approveBtn._bound) {
+    approveBtn._bound = true;
+    approveBtn.addEventListener('click', async () => {
+      try {
+        const res = await fetch(
+          `/api/cases/${encodeURIComponent(granskaState.caseId)}/review/approve`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ min_confidence: granskaState.thresholds.yellow }),
+          },
+        );
+        const d = await res.json();
+        if (!res.ok) throw new Error(d?.detail || `HTTP ${res.status}`);
+        await loadGranska(granskaState.caseId);
+      } catch (e) {
+        alert(`Fel: ${e.message}`);
+      }
+    });
+  }
+
+  const completeBtn = document.getElementById('granskaComplete');
+  if (completeBtn && !completeBtn._bound) {
+    completeBtn._bound = true;
+    completeBtn.addEventListener('click', async () => {
+      try {
+        const res = await fetch(
+          `/api/cases/${encodeURIComponent(granskaState.caseId)}/review/complete`,
+          { method: 'POST' },
+        );
+        const d = await safeJson(res);
+        if (!res.ok) throw new Error(d?.detail || `HTTP ${res.status}`);
+        location.hash = `#/kalkylator/${encodeURIComponent(granskaState.caseId)}`;
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+  }
+
+  document.querySelectorAll('.granska-filter').forEach((btn) => {
+    if (btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', () => {
+      granskaState.filter = btn.dataset.filter;
+      document.querySelectorAll('.granska-filter').forEach((b) =>
+        b.classList.toggle('active', b === btn));
+      renderGranskaRows();
+    });
+  });
+
+  const prev = document.getElementById('granskaPdfPrev');
+  const next = document.getElementById('granskaPdfNext');
+  if (prev && !prev._bound) {
+    prev._bound = true;
+    prev.addEventListener('click', () => granskaShowPage(granskaState.pageNum - 1));
+  }
+  if (next && !next._bound) {
+    next._bound = true;
+    next.addEventListener('click', () => granskaShowPage(granskaState.pageNum + 1));
+  }
+}
+
+let _granskaRenderTask = null;
+
+async function initGranskaPdf(url) {
+  try {
+    const lib = window.pdfjsLib;
+    lib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    granskaState.pdf = await lib.getDocument(url).promise;
+    granskaState.pageCount = granskaState.pdf.numPages;
+    granskaShowPage(1);
+  } catch (e) {
+    console.warn('PDF kunde inte laddas:', e);
+    document.getElementById('granskaPdfPane').hidden = true;
+    document.getElementById('granskaLayout').classList.add('no-pdf');
+  }
+}
+
+async function granskaShowPage(n, bbox) {
+  const st = granskaState;
+  if (!st.pdf) return;
+  n = Math.max(1, Math.min(n, st.pageCount));
+  st.pageNum = n;
+
+  const page = await st.pdf.getPage(n);
+  const wrap = document.getElementById('granskaPdfWrap');
+  const canvas = document.getElementById('granskaPdfCanvas');
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.max(0.3, (wrap.clientWidth - 4) / base.width);
+  st.scale = scale;
+  const viewport = page.getViewport({ scale });
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  if (_granskaRenderTask) {
+    try { _granskaRenderTask.cancel(); } catch {}
+  }
+  _granskaRenderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport });
+  try { await _granskaRenderTask.promise; } catch { return; }
+
+  document.getElementById('granskaPdfLabel').textContent = `Sida ${n} / ${st.pageCount}`;
+
+  const hl = document.getElementById('granskaHighlight');
+  if (bbox && bbox.length === 4) {
+    hl.style.left = `${bbox[0] * scale - 3}px`;
+    hl.style.top = `${bbox[1] * scale - 3}px`;
+    hl.style.width = `${(bbox[2] - bbox[0]) * scale + 6}px`;
+    hl.style.height = `${(bbox[3] - bbox[1]) * scale + 6}px`;
+    hl.hidden = false;
+    wrap.scrollTop = Math.max(0, bbox[1] * scale - 140);
+  } else {
+    hl.hidden = true;
+  }
 }
 
 // ---------- HELPERS ------------------------------------------------------

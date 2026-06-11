@@ -22,3 +22,4 @@ uploads/
 # Golden set — riktiga förfrågningsunderlag, ska INTE upp på GitHub
 evals/golden/*
 !evals/golden/README.md
+evals/results/

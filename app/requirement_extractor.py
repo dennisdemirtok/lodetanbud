@@ -8,10 +8,7 @@ om Claude inte är konfigurerad eller felar.
 
 from __future__ import annotations
 
-import json
-import os
-
-from anthropic import APIError, AsyncAnthropic, AuthenticationError
+from app import llm
 
 
 KNOWN_TEMPLATE_IDS = {"anbudssumma", "ue-lista", "sekretess", "missiv"}
@@ -141,7 +138,7 @@ DEFAULT_REQUIRED_DOCS: list[dict] = [
 ]
 
 
-async def extract_required_docs(af_text: str) -> list[dict]:
+async def extract_required_docs(af_text: str, case_id: str | None = None) -> list[dict]:
     """
     Returnera lista över required documents extraherade från AF-texten.
     Faller tillbaka till DEFAULT_REQUIRED_DOCS om Claude inte är konfigurerad
@@ -150,46 +147,26 @@ async def extract_required_docs(af_text: str) -> list[dict]:
     if not af_text or len(af_text.strip()) < 100:
         return list(DEFAULT_REQUIRED_DOCS)
 
-    if not os.getenv("ANTHROPIC_API_KEY"):
+    prompt = (
+        "Här är AF-texten från ett svenskt förfrågningsunderlag. "
+        "Extrahera listan över dokument som anbudsgivaren ska skicka in.\n\n"
+        "AF-TEXT:\n"
+        f"{af_text[:50_000]}\n\n"
+        "Returnera required_docs enligt schemat."
+    )
+
+    parsed, _err = await llm.call_structured(
+        system=_EXTRACTOR_SYSTEM,
+        prompt=prompt,
+        schema=_REQ_SCHEMA,
+        purpose="extract_requirements",
+        case_id=case_id,
+    )
+    if parsed is None:
         return list(DEFAULT_REQUIRED_DOCS)
 
-    try:
-        client = AsyncAnthropic()
-        prompt = (
-            "Här är AF-texten från ett svenskt förfrågningsunderlag. "
-            "Extrahera listan över dokument som anbudsgivaren ska skicka in.\n\n"
-            "AF-TEXT:\n"
-            f"{af_text[:50_000]}\n\n"
-            "Returnera required_docs enligt schemat."
-        )
-
-        response = await client.messages.create(
-            model="claude-opus-4-7",
-            max_tokens=2048,
-            system=_EXTRACTOR_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-            output_config={
-                "format": {
-                    "type": "json_schema",
-                    "schema": _REQ_SCHEMA,
-                }
-            },
-        )
-
-        text = next((b.text for b in response.content if b.type == "text"), "")
-        if not text:
-            return list(DEFAULT_REQUIRED_DOCS)
-
-        parsed = json.loads(text)
-        docs = parsed.get("required_docs") or []
-        if not docs:
-            return list(DEFAULT_REQUIRED_DOCS)
-        return docs
-
-    except (AuthenticationError, APIError, json.JSONDecodeError, KeyError):
-        return list(DEFAULT_REQUIRED_DOCS)
-    except Exception:
-        return list(DEFAULT_REQUIRED_DOCS)
+    docs = parsed.get("required_docs") or []
+    return docs if docs else list(DEFAULT_REQUIRED_DOCS)
 
 
 def is_known_template(doc_id: str) -> bool:

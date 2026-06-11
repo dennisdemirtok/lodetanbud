@@ -9,9 +9,8 @@ inte är konfigurerad.
 from __future__ import annotations
 
 import json
-import os
 
-from anthropic import APIError, AsyncAnthropic, AuthenticationError
+from app import llm
 
 
 _LESSONS_SCHEMA = {
@@ -90,46 +89,29 @@ async def extract_lessons(
     package_summary: dict,
     parsed_mf: dict | None,
     files: list[dict],
+    case_id: str | None = None,
 ) -> dict:
     """
     Returnera {summary, lessons[], tags[]}.
     Faller tillbaka till heuristisk extraktion om Claude inte är konfigurerad eller felar.
     """
-    if not os.getenv("ANTHROPIC_API_KEY"):
+    prompt = _build_extractor_prompt(package_summary, parsed_mf, files)
+
+    parsed, _err = await llm.call_structured(
+        system=_EXTRACTOR_SYSTEM,
+        prompt=prompt,
+        schema=_LESSONS_SCHEMA,
+        purpose="extract_lessons",
+        case_id=case_id,
+    )
+    if parsed is None:
         return _fallback(package_summary, parsed_mf, files)
 
-    try:
-        client = AsyncAnthropic()
-        prompt = _build_extractor_prompt(package_summary, parsed_mf, files)
-
-        response = await client.messages.create(
-            model="claude-opus-4-7",
-            max_tokens=2048,
-            system=_EXTRACTOR_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-            output_config={
-                "format": {
-                    "type": "json_schema",
-                    "schema": _LESSONS_SCHEMA,
-                }
-            },
-        )
-
-        text = next((b.text for b in response.content if b.type == "text"), "")
-        if not text:
-            return _fallback(package_summary, parsed_mf, files)
-
-        parsed = json.loads(text)
-        return {
-            "summary": parsed.get("summary") or "",
-            "lessons": parsed.get("lessons") or [],
-            "tags": parsed.get("tags") or [],
-        }
-
-    except (AuthenticationError, APIError, json.JSONDecodeError, KeyError):
-        return _fallback(package_summary, parsed_mf, files)
-    except Exception:
-        return _fallback(package_summary, parsed_mf, files)
+    return {
+        "summary": parsed.get("summary") or "",
+        "lessons": parsed.get("lessons") or [],
+        "tags": parsed.get("tags") or [],
+    }
 
 
 def _build_extractor_prompt(

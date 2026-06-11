@@ -13,9 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import select as sa_select
 
 from app import __version__
 from app import afb_templates as afb
@@ -382,7 +383,9 @@ async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONRespon
             grouped = zip_handler.group_by_folder(extracted)
             zip_base = f.filename.rsplit(".", 1)[0]
             for folder, fs in grouped.items():
-                pairs = [(x.filename, x.data) for x in fs]
+                # relative_path (med mappar) som filnamn — mappnamn bär
+                # klassificeringssignal (t.ex. "10. Mängdförteckning/")
+                pairs = [(x.relative_path, x.data) for x in fs]
                 source_name = f"{zip_base}/{folder}" if folder != "(rotmapp)" else zip_base
                 zip_groups.append((source_name, pairs))
         else:
@@ -446,6 +449,7 @@ async def api_case_result(case_id: str) -> JSONResponse:
         "parsed_mf": case.get("parsed_mf"),
         "saved_case": {
             "id": case["id"],
+            "state": case.get("state"),
             "lessons": case.get("lessons") or [],
             "required_docs": case.get("required_docs") or [],
             "insights": case.get("insights"),
@@ -459,6 +463,204 @@ async def api_case_events(case_id: str) -> JSONResponse:
     """Audit-tidslinje för ett case (senaste först)."""
     events = await case_archive.list_events(case_id)
     return JSONResponse({"events": events})
+
+
+# --- Granskning (AP2) -------------------------------------------------------
+
+REVIEW_RED = 0.7
+REVIEW_YELLOW = 0.9
+
+_REVIEW_EDITABLE = {"ama_code", "description", "unit", "quantity", "unit_price"}
+
+
+def _review_line_dict(row: lodet_db.MfLine) -> dict:
+    meta = row.meta or {}
+    return {
+        "id": row.id,
+        "position": row.position,
+        "ama_code": row.ama_code,
+        "description": row.description,
+        "unit": row.unit,
+        "quantity": row.quantity,
+        "unit_price": row.unit_price,
+        "total_amount": row.total,
+        "is_lump_sum": bool(meta.get("is_lump_sum")),
+        "confidence": row.confidence,
+        "extraction_method": row.extraction_method,
+        "reviewed_by_user": row.reviewed_by_user,
+        "source": row.source,
+        "original_values": row.original_values,
+    }
+
+
+async def _recompute_case_total(session, case_id: str) -> float:
+    totals = (await session.execute(
+        sa_select(lodet_db.MfLine.total).where(lodet_db.MfLine.case_id == case_id)
+    )).scalars().all()
+    total = round(sum(t for t in totals if t), 2)
+    case = await session.get(lodet_db.Case, case_id)
+    if case is not None:
+        case.total_amount_sek = total
+        meta = case.meta or {}
+        mfm = dict(meta.get("mf_metadata") or {})
+        mfm["total_amount_sek"] = total
+        case.meta = {**meta, "mf_metadata": mfm}
+    return total
+
+
+@app.get("/api/cases/{case_id}/review")
+async def api_case_review(case_id: str) -> JSONResponse:
+    """Granskningsvyns data: rader med confidence/spans + ev. käll-PDF."""
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+        rows = (await session.execute(
+            sa_select(lodet_db.MfLine)
+            .where(lodet_db.MfLine.case_id == case_id)
+            .order_by(lodet_db.MfLine.position)
+        )).scalars().all()
+        docs = (await session.execute(
+            sa_select(lodet_db.Document).where(
+                lodet_db.Document.case_id == case_id,
+                lodet_db.Document.doc_type == "mf",
+            )
+        )).scalars().all()
+
+    pdf_doc = next(
+        (d for d in docs if (d.storage_path or "").lower().endswith(".pdf")), None
+    )
+    return JSONResponse({
+        "case_id": case_id,
+        "state": case.state,
+        "state_label": case_states.LABELS.get(case.state, case.state),
+        "project_name": case.project_name,
+        "thresholds": {"red": REVIEW_RED, "yellow": REVIEW_YELLOW},
+        "lines": [_review_line_dict(r) for r in rows],
+        "pdf_document": {
+            "id": pdf_doc.id,
+            "filename": pdf_doc.filename,
+            "url": f"/api/cases/{case_id}/file/{pdf_doc.id}",
+        } if pdf_doc else None,
+    })
+
+
+@app.put("/api/cases/{case_id}/review/lines/{line_id}")
+async def api_review_line_update(case_id: str, line_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Spara en granskad/rättad rad. AI:ns ursprungsvärden bevaras i
+    original_values (= träningsdata, AP6-flywheel)."""
+    async with lodet_db.SessionLocal() as session:
+        row = await session.get(lodet_db.MfLine, line_id)
+        if row is None or row.case_id != case_id:
+            raise HTTPException(status_code=404, detail="Raden hittades inte")
+
+        changed: list[str] = []
+        originals = dict(row.original_values or {})
+        for key in _REVIEW_EDITABLE & set(payload.keys()):
+            value = payload[key]
+            if key in ("quantity", "unit_price"):
+                value = None if value in (None, "") else float(value)
+            else:
+                value = (str(value).strip() or None) if value is not None else None
+            old = getattr(row, key)
+            if old != value:
+                if key not in originals:
+                    originals[key] = old
+                setattr(row, key, value)
+                changed.append(key)
+
+        meta = row.meta or {}
+        if not meta.get("is_lump_sum"):
+            if row.quantity is not None and row.unit_price is not None:
+                row.total = round(row.quantity * row.unit_price, 2)
+            else:
+                row.total = None
+
+        row.reviewed_by_user = True
+        row.confidence = 1.0
+        if changed:
+            row.original_values = originals
+
+        total = await _recompute_case_total(session, case_id)
+        await lodet_db.log_event(session, case_id, "user_edit", {
+            "what": "review_line", "line_id": line_id, "fields": changed,
+        })
+        await session.commit()
+        await session.refresh(row)
+        return JSONResponse({"line": _review_line_dict(row), "total_amount_sek": total})
+
+
+@app.post("/api/cases/{case_id}/review/approve")
+async def api_review_approve(case_id: str, payload: dict = Body(default={})) -> JSONResponse:
+    """Godkänn rader utan ändring — alla över min_confidence, eller givna ids."""
+    line_ids = payload.get("line_ids")
+    min_conf = float(payload.get("min_confidence", REVIEW_YELLOW))
+
+    async with lodet_db.SessionLocal() as session:
+        q = sa_select(lodet_db.MfLine).where(
+            lodet_db.MfLine.case_id == case_id,
+            lodet_db.MfLine.reviewed_by_user.is_(False),
+        )
+        rows = (await session.execute(q)).scalars().all()
+        approved = 0
+        for row in rows:
+            if line_ids is not None:
+                if row.id not in line_ids:
+                    continue
+            elif row.confidence < min_conf:
+                continue
+            row.reviewed_by_user = True
+            approved += 1
+        if approved:
+            await lodet_db.log_event(session, case_id, "user_edit", {
+                "what": "approve_lines", "count": approved,
+            })
+        await session.commit()
+    return JSONResponse({"approved": approved})
+
+
+@app.post("/api/cases/{case_id}/review/complete")
+async def api_review_complete(case_id: str) -> JSONResponse:
+    """Slutför granskningen: kräver att inga ogranskade rader ligger under
+    gult — annars 409. NEEDS_REVIEW → CALCULATING via statemaskinen."""
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+
+        rows = (await session.execute(
+            sa_select(lodet_db.MfLine).where(
+                lodet_db.MfLine.case_id == case_id,
+                lodet_db.MfLine.reviewed_by_user.is_(False),
+            )
+        )).scalars().all()
+        blockers = sum(1 for r in rows if r.confidence < REVIEW_YELLOW)
+        if blockers:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{blockers} rader under konfidens-tröskeln är ogranskade",
+            )
+
+        if case.state == case_states.NEEDS_REVIEW:
+            await case_states.transition(session, case, case_states.CALCULATING)
+        await session.commit()
+        return JSONResponse({
+            "state": case.state,
+            "state_label": case_states.LABELS.get(case.state, case.state),
+        })
+
+
+@app.get("/api/cases/{case_id}/file/{doc_id}")
+async def api_case_file(case_id: str, doc_id: str) -> FileResponse:
+    """Servera en lagrad originalfil (för PDF-panelen i granskningsvyn)."""
+    async with lodet_db.SessionLocal() as session:
+        doc = await session.get(lodet_db.Document, doc_id)
+    if doc is None or doc.case_id != case_id or not doc.storage_path:
+        raise HTTPException(status_code=404, detail="Filen hittades inte")
+    path = lodet_db.DATA_ROOT / doc.storage_path
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Filen saknas på volymen")
+    return FileResponse(path, filename=doc.filename)
 
 
 # --- Kunskapsbas (sparade cases) ------------------------------------------

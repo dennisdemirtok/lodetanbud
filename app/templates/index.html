@@ -361,6 +361,7 @@
                 </div>
                 <div class="case-banner-side">
                   <span class="case-banner-id" id="caseBannerId">—</span>
+                  <a class="case-banner-link case-banner-review" id="caseBannerReview" hidden>⚠ Granska extraktionen →</a>
                   <a class="case-banner-link" data-route="#/kunskapsbas">Hämta senare i kunskapsbasen ↗</a>
                 </div>
               </div>
@@ -444,6 +445,13 @@
             </div>
 
             <div class="kalkylator-case" id="kalkylatorCase" hidden>
+              <div class="kalkylator-review-banner" id="kalkylatorReviewBanner" hidden>
+                <span class="kalkylator-review-icon">⚠</span>
+                <div class="kalkylator-review-text">
+                  <strong>Extraktionen behöver granskas</strong> — rader under konfidens-tröskeln måste godkännas innan export.
+                </div>
+                <button type="button" class="btn btn-primary btn-sm" id="kalkylatorReviewBtn">Granska nu →</button>
+              </div>
               <div class="kalkylator-head">
                 <div class="kalkylator-head-text">
                   <p class="eyebrow">Kalkylator</p>
@@ -572,6 +580,48 @@
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- =================== GRANSKNING (AP2) =================== -->
+          <section class="view view-granska" data-view="granska" hidden>
+            <div class="granska-head">
+              <div class="granska-head-text">
+                <p class="eyebrow">Granskning</p>
+                <h1 id="granskaTitle">—</h1>
+                <p class="muted small" id="granskaMeta">—</p>
+              </div>
+              <div class="granska-head-actions">
+                <button type="button" class="btn btn-ghost" id="granskaApproveGreens">Godkänn alla gröna</button>
+                <button type="button" class="btn btn-primary" id="granskaComplete">Slutför granskning →</button>
+              </div>
+            </div>
+
+            <div class="granska-layout" id="granskaLayout">
+              <div class="granska-pdf" id="granskaPdfPane" hidden>
+                <div class="granska-pdf-toolbar">
+                  <button type="button" class="btn btn-ghost btn-sm" id="granskaPdfPrev" aria-label="Föregående sida">‹</button>
+                  <span class="muted small" id="granskaPdfLabel">—</span>
+                  <button type="button" class="btn btn-ghost btn-sm" id="granskaPdfNext" aria-label="Nästa sida">›</button>
+                  <span class="muted small granska-pdf-filename" id="granskaPdfFilename"></span>
+                </div>
+                <div class="granska-pdf-wrap" id="granskaPdfWrap">
+                  <canvas id="granskaPdfCanvas"></canvas>
+                  <div class="granska-highlight" id="granskaHighlight" hidden></div>
+                </div>
+              </div>
+
+              <div class="granska-rows">
+                <div class="granska-filterbar">
+                  <button type="button" class="granska-filter active" data-filter="alla">Alla</button>
+                  <button type="button" class="granska-filter" data-filter="rod">Röda</button>
+                  <button type="button" class="granska-filter" data-filter="gul">Gula</button>
+                  <button type="button" class="granska-filter" data-filter="gron">Gröna</button>
+                  <button type="button" class="granska-filter" data-filter="granskad">Granskade</button>
+                  <span class="muted small" id="granskaCounts"></span>
+                </div>
+                <div id="granskaRowList" class="granska-row-list"></div>
               </div>
             </div>
           </section>
@@ -1006,6 +1056,7 @@
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

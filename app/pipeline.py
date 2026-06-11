@@ -19,12 +19,17 @@ from app import case_archive
 from app import excel_parser
 from app import file_classifier
 from app import lesson_extractor
+from app import llm
 from app import pdf_extractor
+from app import pdf_mf_parser
 from app import requirement_extractor
 from app import states
 from app.db import DATA_ROOT, Case, SessionLocal
 from app.parser import parse_csv_bytes
 from app.worker import register
+
+# Rader under denna confidence skickar casen till granskning (AP2)
+REVIEW_THRESHOLD = 0.9
 
 
 def classify_one(filename: str, data: bytes) -> tuple[lodet_agent.FileInfo, dict | None]:
@@ -70,10 +75,14 @@ def classify_one(filename: str, data: bytes) -> tuple[lodet_agent.FileInfo, dict
 
 def _classify_batch(
     pairs: list[tuple[str, bytes, str]],
-) -> tuple[list[lodet_agent.FileInfo], dict | None, str]:
-    """Klassificera alla filer + extrahera AF-text. Synkron — körs i tråd."""
+) -> tuple[list[lodet_agent.FileInfo], dict | None, str, list[dict]]:
+    """Klassificera alla filer + extrahera AF-text. Synkron — körs i tråd.
+
+    Returnerar (file_infos, parsed_mf, af_text, rescue_pages). Excel/CSV-MF
+    föredras; saknas sådan provas PDF-MF via pdfplumber (AP2)."""
     file_infos: list[lodet_agent.FileInfo] = []
     parsed_mf: dict | None = None
+    mf_pdf_candidates: list[bytes] = []
     data_by_name: dict[str, bytes] = {}
 
     for fname, data, _relpath in pairs:
@@ -82,6 +91,23 @@ def _classify_batch(
         data_by_name[fname] = data
         if mf and parsed_mf is None:
             parsed_mf = mf
+        if info.type == "mf" and fname.lower().endswith(".pdf"):
+            mf_pdf_candidates.append(data)
+
+    # PDF-MF-fallback när ingen Excel/CSV-MF parsades
+    rescue_pages: list[dict] = []
+    if parsed_mf is None:
+        for data in mf_pdf_candidates:
+            try:
+                doc, rescue = pdf_mf_parser.parse_pdf_mf(data)
+            except Exception:
+                continue
+            if doc and doc.lines:
+                parsed_mf = doc.to_dict()
+                rescue_pages = rescue
+                break
+            if rescue:
+                rescue_pages = rescue
 
     af_text = ""
     for info in file_infos:
@@ -92,7 +118,7 @@ def _classify_batch(
                 if af_text:
                     break
 
-    return file_infos, parsed_mf, af_text
+    return file_infos, parsed_mf, af_text, rescue_pages
 
 
 @register("parse_package")
@@ -115,8 +141,16 @@ async def run_parse_package(job) -> dict:
         p = DATA_ROOT / ref["path"]
         pairs.append((ref["filename"], p.read_bytes(), ref["path"]))
 
-    # CPU-tungt (pypdf/openpyxl) i tråd så event-loopen inte blockeras
-    file_infos, parsed_mf, af_text = await asyncio.to_thread(_classify_batch, pairs)
+    # CPU-tungt (pypdf/openpyxl/pdfplumber) i tråd så event-loopen inte blockeras
+    file_infos, parsed_mf, af_text, rescue_pages = await asyncio.to_thread(_classify_batch, pairs)
+
+    # LLM-rescue: sidor där PDF-tabellextraktionen misslyckades
+    if rescue_pages and llm.is_configured():
+        rescued = await _llm_rescue_mf(case_id, rescue_pages)
+        if rescued:
+            if parsed_mf is None:
+                parsed_mf = {"metadata": {}, "lines": []}
+            parsed_mf["lines"] = (parsed_mf.get("lines") or []) + rescued
 
     analysis = lodet_agent.analyze_package(file_infos, parsed_mf)
     files_dict = analysis["files"]
@@ -129,7 +163,8 @@ async def run_parse_package(job) -> dict:
     # LLM-stegen — var och en med egen fallback, som tidigare
     try:
         extracted = await lesson_extractor.extract_lessons(
-            package_summary=analysis["summary"], parsed_mf=parsed_mf, files=files_dict
+            package_summary=analysis["summary"], parsed_mf=parsed_mf, files=files_dict,
+            case_id=case_id,
         )
         lessons = extracted.get("lessons") or []
         if extracted.get("summary"):
@@ -140,13 +175,14 @@ async def run_parse_package(job) -> dict:
         lessons = []
 
     try:
-        required_docs = await requirement_extractor.extract_required_docs(af_text)
+        required_docs = await requirement_extractor.extract_required_docs(af_text, case_id=case_id)
     except Exception:
         required_docs = list(requirement_extractor.DEFAULT_REQUIRED_DOCS)
 
     try:
         insights = await agent_insights.extract_insights(
-            package_summary=analysis["summary"], files=files_dict, af_text=af_text
+            package_summary=analysis["summary"], files=files_dict, af_text=af_text,
+            case_id=case_id,
         )
     except Exception:
         insights = {"observations": [], "questions": [], "vendor_templates": []}
@@ -162,18 +198,74 @@ async def run_parse_package(job) -> dict:
         analysis=analysis,
     )
 
-    # EXTRACTING → CALCULATING (NEEDS_REVIEW-grenen aktiveras i AP2
-    # när extraktion får confidence-scoring)
+    # EXTRACTING → NEEDS_REVIEW om någon rad ligger under tröskeln,
+    # annars direkt till CALCULATING
+    lines = (parsed_mf or {}).get("lines") or []
+    low_conf = sum(
+        1 for l in lines
+        if (l.get("confidence") if l.get("confidence") is not None else 1.0) < REVIEW_THRESHOLD
+    )
+    target = states.NEEDS_REVIEW if low_conf > 0 else states.CALCULATING
+
     async with SessionLocal() as session:
         case = await session.get(Case, case_id)
         if case.state == states.EXTRACTING:
-            await states.transition(session, case, states.CALCULATING)
+            await states.transition(session, case, target)
         await session.commit()
 
     return {
         "case_id": case_id,
         "file_count": len(files_dict),
-        "line_count": len((parsed_mf or {}).get("lines") or []),
+        "line_count": len(lines),
+        "low_confidence_count": low_conf,
         "lesson_count": len(lessons),
         "required_count": len(required_docs),
+        "state": target,
     }
+
+
+async def _llm_rescue_mf(case_id: str, rescue_pages: list[dict], max_pages: int = 12) -> list[dict]:
+    """Skicka sidor där tabellextraktionen misslyckades till Claude,
+    en sida per anrop. Returnerar line-dicts med extraction_method='llm'."""
+    out: list[dict] = []
+    for page_info in rescue_pages[:max_pages]:
+        parsed, _err = await llm.call_structured(
+            system=pdf_mf_parser.RESCUE_SYSTEM,
+            prompt=(
+                f"Sida {page_info['page']} ur mängdförteckningen:\n\n"
+                f"{page_info['text']}\n\n"
+                "Extrahera MF-raderna enligt schemat."
+            ),
+            schema=pdf_mf_parser.RESCUE_SCHEMA,
+            purpose="mf_rescue",
+            case_id=case_id,
+            max_tokens=4096,
+        )
+        if parsed is None:
+            continue
+        for raw in parsed.get("lines") or []:
+            desc = (raw.get("description") or "").strip()
+            if not desc:
+                continue
+            unit = (raw.get("unit") or "").strip() or None
+            qty = raw.get("quantity")
+            conf = 0.75
+            if unit and unit.lower() in pdf_mf_parser.KNOWN_UNITS:
+                conf += 0.05
+            if qty is not None:
+                conf += 0.05
+            out.append({
+                "line_number": None,
+                "ama_code": (raw.get("ama_code") or "").strip() or None,
+                "ama_section_title": None,
+                "description": desc,
+                "unit": unit,
+                "quantity": qty,
+                "unit_price": raw.get("unit_price"),
+                "total_amount": raw.get("total_amount"),
+                "is_lump_sum": False,
+                "source": {"page": page_info["page"]},
+                "extraction_method": "llm",
+                "confidence": round(min(conf, 0.85), 2),
+            })
+    return out

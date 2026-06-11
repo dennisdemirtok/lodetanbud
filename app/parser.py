@@ -34,6 +34,9 @@ class OfferLine:
     unit_price: float | None
     total_amount: float | None
     is_lump_sum: bool
+    source: dict | None = None          # span: {"row": i} / {"sheet": s, "row": r} / {"page": p, "bbox": [...]}
+    extraction_method: str = "deterministic"  # deterministic | llm
+    confidence: float = 1.0
     raw_row: list[str] = field(repr=False, default_factory=list)
 
 
@@ -239,6 +242,7 @@ def _parse_rows(raw_rows: list[list[str]]) -> OfferDocument:
             unit_price=parse_swedish_number(unit_price),
             total_amount=parse_swedish_number(total),
             is_lump_sum=(unit == "-" and qty == "-" and unit_price == "-"),
+            source={"row": idx},
             raw_row=row,
         )
         doc.lines.append(line)
