@@ -71,14 +71,9 @@ def is_configured() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY"))
 
 
-def _system_with_context(context: dict | None, user_query: str = "") -> str:
+def _system_with_context(context: dict | None, relevant_cases: list[dict] | None = None) -> str:
     parts = [SYSTEM_PROMPT]
-
-    # Hämta relevanta cases från arkivet baserat på frågan
-    try:
-        relevant_cases = case_archive.find_relevant(user_query, limit=3)
-    except Exception:
-        relevant_cases = []
+    relevant_cases = relevant_cases or []
 
     if relevant_cases:
         parts.append("\n---\nKUNSKAPSBAS — relevanta tidigare anbud från arkivet:")
@@ -113,7 +108,13 @@ async def stream_chat(
         if m.get("role") == "user":
             last_user_query = m.get("content") or ""
             break
-    system_text = _system_with_context(context, user_query=last_user_query)
+
+    # Hämta relevanta cases från arkivet (async sedan AP1/DB-bytet)
+    try:
+        relevant_cases = await case_archive.find_relevant(last_user_query, limit=3)
+    except Exception:
+        relevant_cases = []
+    system_text = _system_with_context(context, relevant_cases=relevant_cases)
 
     try:
         async with client.messages.stream(

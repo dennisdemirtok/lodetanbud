@@ -5,7 +5,10 @@ Lodet — FastAPI-app
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,20 +19,19 @@ from fastapi.templating import Jinja2Templates
 
 from app import __version__
 from app import afb_templates as afb
-from app import agent_insights
 from app import ama_catalog
-from app import agent as lodet_agent
 from app import case_archive
 from app import chat as lodet_chat
 from app import company_settings
-from app import excel_parser
-from app import file_classifier
-from app import lesson_extractor
-from app import pdf_extractor
+from app import db as lodet_db
+from app import db_migrate
+from app import jobs as jobq
 from app import pdf_renderer
 from app import requirement_extractor
 from app import resource_library
+from app import states as case_states
 from app import ue_emailer
+from app import worker as lodet_worker
 from app import zip_handler
 from app.excel_builder import build_workbook
 from app.parser import parse_csv_bytes
@@ -42,10 +44,35 @@ EXAMPLES_DIR = BASE_DIR.parent / "examples"
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Initiera DB, återställ avbrutna jobb, migrera legacy-JSON och
+    starta jobb-workern (genomförandeplan AP1)."""
+    await lodet_db.init_db()
+    reset = await jobq.reset_orphans()
+    if reset:
+        print(f"[lodet] {reset} avbrutna jobb återställda till kön")
+    try:
+        migrated = await db_migrate.migrate_legacy_json()
+        if migrated:
+            print(f"[lodet] {migrated} legacy-JSON-cases migrerade till databasen")
+    except Exception as e:
+        print(f"[lodet] legacy-migrering misslyckades: {e}")
+    worker_task = asyncio.create_task(lodet_worker.worker_loop())
+    yield
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+
+
 app = FastAPI(
     title="Lodet",
     description="Anbudsverktyg för svenska bygg- och anläggningsentreprenörer",
     version=__version__,
+    lifespan=lifespan,
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -292,147 +319,50 @@ async def api_chat(payload: dict = Body(...)) -> StreamingResponse:
     )
 
 
-# --- Agent / paketanalys --------------------------------------------------
+# --- Agent / paketanalys ---------------------------------------------------
+# Analysen körs av workern (app/pipeline.py). Endpointen gör bara den
+# synkrona delen: packa upp, spara filer på volymen, skapa case (INTAKE)
+# och köa parse_package — svar < 1 s. Frontend pollar /status.
 
-def _classify_one(filename: str, data: bytes) -> tuple[lodet_agent.FileInfo, dict | None]:
-    """Klassificera en enskild fil och returnera (FileInfo, ev. parsed_mf)."""
-    size_kb = max(1, len(data) // 1024)
-    content_text = ""
-    if filename.lower().endswith(".pdf"):
-        content_text = pdf_extractor.extract_first_page_text(data)
-
-    kind = file_classifier.classify(filename, data, content_text)
-
-    parsed_mf: dict | None = None
-    lower_name = filename.lower()
-    if kind.type == "mf":
-        try:
-            if lower_name.endswith(".csv"):
-                doc = parse_csv_bytes(data)
-                parsed_mf = doc.to_dict()
-            elif lower_name.endswith((".xlsx", ".xlsm")):
-                doc = excel_parser.parse_excel_bytes(data)
-                parsed_mf = doc.to_dict()
-        except Exception:
-            pass
-
-    meta_extra: dict = {}
-    if content_text:
-        meta_extra = pdf_extractor.sniff_metadata_from_text(content_text)
-    if filename.lower().endswith(".pdf"):
-        pdf_meta = pdf_extractor.extract_metadata(data)
-        meta_extra.update({"page_count": pdf_meta.get("page_count")})
-
-    info = lodet_agent.FileInfo(
-        filename=filename,
-        type=kind.type,
-        label=kind.label,
-        confidence=kind.confidence,
-        size_kb=size_kb,
-        project_id=kind.project_id or file_classifier.extract_project_id(filename),
-        discipline=kind.discipline,
-        metadata=meta_extra or None,
-    )
-    return info, parsed_mf
+def _safe_storage_name(filename: str) -> str:
+    name = filename.replace("\\", "/").strip("/")
+    name = name.replace("/", "__")
+    name = re.sub(r"[^\w.\-åäöÅÄÖ ()]+", "_", name)
+    return name[:180] or "fil"
 
 
-async def _analyze_filebatch(
-    filename_data_pairs: list[tuple[str, bytes]],
-    source: str,
-    source_name: str,
-    save_to_archive: bool = True,
-) -> dict:
-    """
-    Klassificera en samling filer (filnamn + bytes), kör agentanalys,
-    extrahera lärdomar och anbudskrav med Claude och spara till arkiv.
-    """
-    file_infos: list[lodet_agent.FileInfo] = []
-    parsed_mf: dict | None = None
+async def _stage_package(source: str, source_name: str, pairs: list[tuple[str, bytes]]) -> str:
+    """Skapa case-skal, skriv filerna till volymen och köa analys-jobbet."""
+    case_id = await case_archive.create_case_shell(source, source_name)
+    case_dir = lodet_db.FILES_DIR / case_id
+    case_dir.mkdir(parents=True, exist_ok=True)
 
-    for fname, data in filename_data_pairs:
-        info, mf = _classify_one(fname, data)
-        file_infos.append(info)
-        if mf and parsed_mf is None:
-            parsed_mf = mf
+    file_refs: list[dict] = []
+    used: set[str] = set()
+    for filename, data in pairs:
+        safe = _safe_storage_name(filename)
+        candidate, i = safe, 1
+        while candidate in used:
+            candidate = f"{i}__{safe}"
+            i += 1
+        used.add(candidate)
+        path = case_dir / candidate
+        path.write_bytes(data)
+        file_refs.append({
+            "filename": filename,
+            "path": str(path.relative_to(lodet_db.DATA_ROOT)),
+        })
 
-    analysis = lodet_agent.analyze_package(file_infos, parsed_mf)
-
-    # Plocka ut full text från AF-PDFen för krav-extraktion
-    af_text = ""
-    data_by_name = {fname: data for fname, data in filename_data_pairs}
-    for info in file_infos:
-        if info.type == "af" and info.filename.lower().endswith(".pdf"):
-            data = data_by_name.get(info.filename)
-            if data:
-                af_text = pdf_extractor.extract_all_text(data, max_chars=50_000)
-                if af_text:
-                    break
-
-    saved_case = None
-    if save_to_archive:
-        files_dict = analysis["files"]
-        try:
-            extracted = await lesson_extractor.extract_lessons(
-                package_summary=analysis["summary"],
-                parsed_mf=parsed_mf,
-                files=files_dict,
-            )
-            lessons = extracted.get("lessons") or []
-            if extracted.get("summary"):
-                analysis["summary"]["agent_summary"] = extracted["summary"]
-            if extracted.get("tags"):
-                analysis["summary"]["tags"] = extracted["tags"]
-        except Exception:
-            lessons = []
-
-        try:
-            required_docs = await requirement_extractor.extract_required_docs(af_text)
-        except Exception:
-            required_docs = list(requirement_extractor.DEFAULT_REQUIRED_DOCS)
-
-        try:
-            insights = await agent_insights.extract_insights(
-                package_summary=analysis["summary"],
-                files=files_dict,
-                af_text=af_text,
-            )
-        except Exception:
-            insights = {"observations": [], "questions": [], "vendor_templates": []}
-
-        try:
-            case = case_archive.save_case(
-                source=source,
-                source_name=source_name,
-                summary=analysis["summary"],
-                files=files_dict,
-                parsed_mf=parsed_mf,
-                lessons=lessons,
-                required_docs=required_docs,
-                insights=insights,
-            )
-            saved_case = {
-                "id": case.id,
-                "lessons": case.lessons,
-                "required_docs": case.required_docs,
-                "insights": case.insights,
-            }
-        except Exception:
-            saved_case = None
-
-    return {
-        "analysis": analysis,
-        "parsed_mf": parsed_mf,
-        "saved_case": saved_case,
-    }
+    await jobq.enqueue_standalone(case_id, "parse_package", {"case_id": case_id, "files": file_refs})
+    return case_id
 
 
 @app.post("/api/package/analyze")
 async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONResponse:
     """
     Tar emot ett helt anbudspaket — vanliga filer eller en eller flera ZIP-filer.
-
     Om en ZIP innehåller flera toppmappar tolkas varje toppmapp som ett separat
-    anbudspaket. Resultatet sparas till case-arkivet på Volume.
+    anbudspaket. Returnerar case-ids direkt; analysen körs som jobb.
     """
     if not files:
         raise HTTPException(status_code=400, detail="Inga filer mottagna")
@@ -458,47 +388,89 @@ async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONRespon
         else:
             plain_files.append((f.filename, data))
 
-    results: list[dict] = []
+    case_ids: list[str] = []
 
     # Plain (lösa filer + ev. mapp via webkitdirectory) → ETT paket
     if plain_files:
-        source_name = "uppladdat-paket"
-        result = await _analyze_filebatch(
-            plain_files,
+        case_ids.append(await _stage_package(
             source="folder" if len(plain_files) > 1 else "single",
-            source_name=source_name,
-        )
-        results.append(result)
+            source_name="uppladdat-paket",
+            pairs=plain_files,
+        ))
 
-    # En analys per ZIP-mapp
+    # Ett case per ZIP-mapp
     for source_name, pairs in zip_groups:
-        result = await _analyze_filebatch(
-            pairs,
-            source="zip",
-            source_name=source_name,
-        )
-        results.append(result)
+        case_ids.append(await _stage_package(source="zip", source_name=source_name, pairs=pairs))
 
-    if len(results) == 1:
-        return JSONResponse(results[0])
+    if not case_ids:
+        raise HTTPException(status_code=400, detail="Inga giltiga filer i uppladdningen")
 
     return JSONResponse({
-        "multi": True,
-        "case_count": len(results),
-        "results": results,
+        "case_ids": case_ids,
+        "multi": len(case_ids) > 1,
+        "case_count": len(case_ids),
     })
+
+
+@app.get("/api/cases/{case_id}/status")
+async def api_case_status(case_id: str) -> JSONResponse:
+    """State + jobblista för polling under analys."""
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+        jobs = await jobq.jobs_for_case(session, case_id)
+    return JSONResponse({
+        "case_id": case_id,
+        "state": case.state,
+        "state_label": case_states.LABELS.get(case.state, case.state),
+        "jobs": jobs,
+    })
+
+
+@app.get("/api/cases/{case_id}/result")
+async def api_case_result(case_id: str) -> JSONResponse:
+    """Analysresultat i samma form som gamla synkrona /api/package/analyze."""
+    case = await case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+    analysis = case.get("analysis") or {
+        "summary": case.get("summary") or {},
+        "files": case.get("files") or [],
+        "narrative": (case.get("summary") or {}).get("agent_summary") or "",
+        "recommendations": [],
+        "ue_suggestions": [],
+    }
+    return JSONResponse({
+        "analysis": analysis,
+        "parsed_mf": case.get("parsed_mf"),
+        "saved_case": {
+            "id": case["id"],
+            "lessons": case.get("lessons") or [],
+            "required_docs": case.get("required_docs") or [],
+            "insights": case.get("insights"),
+            "project_name": case.get("project_name"),
+        },
+    })
+
+
+@app.get("/api/cases/{case_id}/events")
+async def api_case_events(case_id: str) -> JSONResponse:
+    """Audit-tidslinje för ett case (senaste först)."""
+    events = await case_archive.list_events(case_id)
+    return JSONResponse({"events": events})
 
 
 # --- Kunskapsbas (sparade cases) ------------------------------------------
 
 @app.get("/api/cases")
 async def api_cases_list() -> JSONResponse:
-    return JSONResponse({"cases": case_archive.list_cases_summary()})
+    return JSONResponse({"cases": await case_archive.list_cases_summary()})
 
 
 @app.get("/api/cases/{case_id}")
 async def api_case_get(case_id: str) -> JSONResponse:
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
     return JSONResponse(case)
@@ -506,7 +478,7 @@ async def api_case_get(case_id: str) -> JSONResponse:
 
 @app.delete("/api/cases/{case_id}")
 async def api_case_delete(case_id: str) -> JSONResponse:
-    if not case_archive.delete_case(case_id):
+    if not await case_archive.delete_case(case_id):
         raise HTTPException(status_code=404, detail="Case hittades inte")
     return JSONResponse({"deleted": case_id})
 
@@ -654,7 +626,7 @@ Underskrift:    ________________________________________
 @app.get("/api/cases/{case_id}/drafts")
 async def api_case_drafts(case_id: str) -> JSONResponse:
     """Lista required_docs + status (genererat/redigerat) för ett case."""
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
 
@@ -685,7 +657,7 @@ async def api_case_drafts(case_id: str) -> JSONResponse:
 @app.post("/api/cases/{case_id}/draft/{doc_id}")
 async def api_case_draft_generate(case_id: str, doc_id: str) -> JSONResponse:
     """Generera (eller återgenerera) utkast för ett krav i ett case."""
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
 
@@ -699,7 +671,7 @@ async def api_case_draft_generate(case_id: str, doc_id: str) -> JSONResponse:
         doc_meta = {"id": doc_id, "title": doc_id, "description": "", "code": ""}
 
     text = _build_draft_text(case, doc_id, doc_meta)
-    case_archive.update_draft(case_id, doc_id, text, edited=False)
+    await case_archive.update_draft(case_id, doc_id, text, edited=False)
 
     return JSONResponse({
         "case_id": case_id,
@@ -712,7 +684,7 @@ async def api_case_draft_generate(case_id: str, doc_id: str) -> JSONResponse:
 @app.put("/api/cases/{case_id}/draft/{doc_id}")
 async def api_case_draft_update(case_id: str, doc_id: str, payload: dict = Body(...)) -> JSONResponse:
     """Spara redigerad utkast-text."""
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
 
@@ -720,14 +692,14 @@ async def api_case_draft_update(case_id: str, doc_id: str, payload: dict = Body(
     if not text:
         raise HTTPException(status_code=400, detail="text saknas")
 
-    case_archive.update_draft(case_id, doc_id, text, edited=True)
+    await case_archive.update_draft(case_id, doc_id, text, edited=True)
     return JSONResponse({"case_id": case_id, "doc_id": doc_id, "status": "edited"})
 
 
 @app.get("/api/cases/{case_id}/draft/{doc_id}/pdf")
 async def api_case_draft_pdf(case_id: str, doc_id: str) -> Response:
     """Returnera utkastet som PDF. Genererar text on-demand om inget sparat utkast finns."""
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
 
@@ -740,7 +712,7 @@ async def api_case_draft_pdf(case_id: str, doc_id: str) -> Response:
             "id": doc_id, "title": doc_id, "description": "", "code": "",
         }
         text = _build_draft_text(case, doc_id, doc_meta)
-        case_archive.update_draft(case_id, doc_id, text, edited=False)
+        await case_archive.update_draft(case_id, doc_id, text, edited=False)
 
     required = case.get("required_docs") or []
     doc_meta = next((d for d in required if d.get("id") == doc_id), {})
@@ -768,7 +740,7 @@ async def api_case_draft_pdf(case_id: str, doc_id: str) -> Response:
 @app.get("/api/cases/{case_id}/mf")
 async def api_case_mf_get(case_id: str) -> JSONResponse:
     """Hämta nuvarande mängdförteckning för ett case (för editor)."""
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
 
@@ -782,7 +754,7 @@ async def api_case_mf_get(case_id: str) -> JSONResponse:
 @app.put("/api/cases/{case_id}/mf")
 async def api_case_mf_update(case_id: str, payload: dict = Body(...)) -> JSONResponse:
     """Spara redigerad mängdförteckning (à-priser/belopp). Räknar om totalbelopp."""
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
 
@@ -810,7 +782,7 @@ async def api_case_mf_update(case_id: str, payload: dict = Body(...)) -> JSONRes
     meta["total_amount_sek"] = round(total, 2)
     parsed_mf["metadata"] = meta
 
-    if not case_archive.update_parsed_mf(case_id, parsed_mf):
+    if not await case_archive.update_parsed_mf(case_id, parsed_mf):
         raise HTTPException(status_code=500, detail="Kunde inte spara MF")
 
     return JSONResponse({
@@ -824,7 +796,7 @@ async def api_case_mf_update(case_id: str, payload: dict = Body(...)) -> JSONRes
 @app.get("/api/cases/{case_id}/mf/csv")
 async def api_case_mf_csv(case_id: str) -> Response:
     """Returnera MF som semikolon-separerad CSV (öppnas direkt i Google Sheets)."""
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
 
@@ -865,7 +837,7 @@ async def api_case_mf_csv(case_id: str) -> Response:
 @app.get("/api/cases/{case_id}/mf/excel")
 async def api_case_mf_excel(case_id: str) -> Response:
     """Returnera ifylld mängdförteckning som Excel-mall."""
-    case = case_archive.get_case(case_id)
+    case = await case_archive.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="Case hittades inte")
 

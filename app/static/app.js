@@ -500,7 +500,7 @@ async function renderActiveBids() {
       return `
         <div class="bid-row" data-case-id="${escapeHtml(c.id)}">
           <div>
-            <div class="bid-name">${escapeHtml(c.project_name || c.source_name || '—')}</div>
+            <div class="bid-name">${escapeHtml(c.project_name || c.source_name || '—')}${stateChip(c)}</div>
             <div class="bid-meta">${escapeHtml(c.document_number || '')} ${c.document_number ? '· ' : ''}${c.file_count} filer · ${progress}</div>
           </div>
           <div class="bid-amount">${c.total_amount_sek ? fmtSEK.format(c.total_amount_sek) + ' kr' : '—'}</div>
@@ -960,21 +960,36 @@ async function handlePackageFiles(files) {
   for (const f of files) fd.append('files', f);
 
   try {
+    // Synkron del: uppladdning + case-skapande (< 1 s). Analysen körs som
+    // jobb på servern — vi pollar status tills den är klar.
     const res = await fetch('/api/package/analyze', { method: 'POST', body: fd });
     if (!res.ok) {
       const err = await safeJson(res);
       throw new Error(err?.detail || `HTTP ${res.status}`);
     }
     const data = await res.json();
+    const caseIds = data.case_ids || [];
+    if (caseIds.length === 0) throw new Error('Inga cases skapades');
 
+    await pollCasesUntilDone(caseIds);
     finishUploadProgress();
 
-    if (data.multi) {
-      renderMultiAgentResult(data);
+    const results = await Promise.all(caseIds.map(async (id) => {
+      const r = await fetch(`/api/cases/${encodeURIComponent(id)}/result`);
+      if (!r.ok) throw new Error(`Kunde inte hämta resultat för ${id}`);
+      return r.json();
+    }));
+
+    if (results.length === 1) {
+      lastAnalysis = results[0].analysis;
+      renderAgentResult(results[0].analysis, results[0].saved_case);
+      if (results[0].parsed_mf) saveMfToHistory(results[0].parsed_mf);
     } else {
-      lastAnalysis = data.analysis;
-      renderAgentResult(data.analysis, data.saved_case);
-      if (data.parsed_mf) saveMfToHistory(data.parsed_mf);
+      renderMultiAgentResult({
+        multi: true,
+        case_count: results.length,
+        results,
+      });
     }
     setTimeout(hideUploadProgress, 800);
   } catch (e) {
@@ -983,6 +998,38 @@ async function handlePackageFiles(files) {
     status.className = 'status error';
     status.textContent = `Fel: ${e.message}`;
   }
+}
+
+async function pollCasesUntilDone(caseIds, { timeoutMs = 300000, intervalMs = 2000 } = {}) {
+  const t0 = Date.now();
+  while (true) {
+    const statuses = await Promise.all(caseIds.map(async (id) => {
+      try {
+        const r = await fetch(`/api/cases/${encodeURIComponent(id)}/status`);
+        return r.ok ? await r.json() : null;
+      } catch { return null; }
+    }));
+    const valid = statuses.filter(Boolean);
+
+    const failedJob = valid.flatMap((s) => s.jobs || []).find((j) => j.status === 'failed');
+    if (failedJob) {
+      const firstLine = (failedJob.error || 'Analysen misslyckades').split('\n')[0];
+      throw new Error(firstLine);
+    }
+
+    const busy = valid.some((s) => s.state === 'INTAKE' || s.state === 'EXTRACTING');
+    if (valid.length === caseIds.length && !busy) return valid;
+
+    if (Date.now() - t0 > timeoutMs) {
+      throw new Error('Analysen tog för lång tid — kolla anbudet under Anbud-tabben om en stund');
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+function stateChip(c) {
+  if (!c || !c.state) return '';
+  return ` <span class="state-chip" data-state="${escapeHtml(c.state)}">${escapeHtml(c.state_label || c.state)}</span>`;
 }
 
 // ---------- UPLOAD PROGRESS UI ----------------------------------------
@@ -2000,7 +2047,7 @@ async function renderKalkylatorEmpty() {
     listEl.innerHTML = cases.map((c) => `
       <div class="bid-row" data-case-id="${escapeHtml(c.id)}">
         <div>
-          <div class="bid-name">${escapeHtml(c.project_name || c.source_name || '—')}</div>
+          <div class="bid-name">${escapeHtml(c.project_name || c.source_name || '—')}${stateChip(c)}</div>
           <div class="bid-meta">${escapeHtml(c.document_number || '')} ${c.document_number ? '· ' : ''}${c.file_count} filer · ${c.required_count || 0} krav</div>
         </div>
         <div class="bid-amount">${c.total_amount_sek ? fmtSEK.format(c.total_amount_sek) + ' kr' : '—'}</div>
@@ -2074,10 +2121,11 @@ async function renderKalkylatorForCase(caseId) {
 
     document.getElementById('kalkylatorProjectName').textContent = c.project_name || c.source_name || c.id;
     const metaParts = [];
-    if (c.document_number) metaParts.push(c.document_number);
-    if (c.customer) metaParts.push(c.customer);
-    if (c.created_at) metaParts.push(`skapad ${formatRelDate(c.created_at)}`);
-    document.getElementById('kalkylatorMeta').textContent = metaParts.join(' · ') || '—';
+    if (c.document_number) metaParts.push(escapeHtml(c.document_number));
+    if (c.customer) metaParts.push(escapeHtml(c.customer));
+    if (c.created_at) metaParts.push(`skapad ${escapeHtml(formatRelDate(c.created_at))}`);
+    document.getElementById('kalkylatorMeta').innerHTML =
+      `${stateChip(c)}${metaParts.length ? ' · ' + metaParts.join(' · ') : ''}` || '—';
 
     _addKalkRecent(caseId, c.project_name || c.source_name);
     renderKalkylatorRecent();
@@ -2109,6 +2157,7 @@ async function renderKalkylatorForCase(caseId) {
 
     // Info-pane
     renderKalkylatorInfo(c);
+    loadCaseTimeline(caseId);
 
     // Aprisberäkningar
     renderAprisOverview(c);
@@ -2192,6 +2241,53 @@ function renderAprisOverview(c) {
       setTimeout(() => openCalcModal(idx), 100);
     });
   });
+}
+
+const _EVENT_LABELS = {
+  case_created: 'Anbud skapat',
+  state_change: 'Statusbyte',
+  job_queued: 'Jobb köat',
+  job_done: 'Jobb klart',
+  job_retry: 'Jobb omkört',
+  job_failed: 'Jobb misslyckades',
+  analysis_written: 'Analys sparad',
+  user_edit: 'Redigering',
+  draft_updated: 'Utkast uppdaterat',
+  migrated_from_json: 'Migrerad från JSON-arkivet',
+};
+
+async function loadCaseTimeline(caseId) {
+  const el = document.getElementById('kalkylatorTimeline');
+  if (!el) return;
+  el.innerHTML = '<li class="timeline-empty">Laddar …</li>';
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/events`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    const events = d.events || [];
+    if (events.length === 0) {
+      el.innerHTML = '<li class="timeline-empty">Inga händelser ännu</li>';
+      return;
+    }
+    el.innerHTML = events.map((e) => {
+      const label = _EVENT_LABELS[e.kind] || e.kind;
+      let detail = '';
+      if (e.kind === 'state_change' && e.data?.to) detail = e.data.to;
+      else if (e.kind === 'job_queued' || e.kind === 'job_done') detail = e.data?.kind || '';
+      else if (e.kind === 'user_edit') detail = e.data?.what || '';
+      else if (e.kind === 'draft_updated') detail = e.data?.doc_id || '';
+      else if (e.kind === 'analysis_written') detail = `${e.data?.file_count ?? '?'} filer · ${e.data?.line_count ?? '?'} MF-rader`;
+      return `
+        <li class="timeline-item">
+          <span class="timeline-time">${escapeHtml(formatRelDate(e.at))}</span>
+          <span class="timeline-kind">${escapeHtml(label)}</span>
+          <span class="timeline-detail">${escapeHtml(detail)}</span>
+        </li>
+      `;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<li class="timeline-empty">Fel: ${escapeHtml(err.message)}</li>`;
+  }
 }
 
 function renderKalkylatorNotes(caseId) {
