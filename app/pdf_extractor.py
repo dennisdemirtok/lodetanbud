@@ -25,6 +25,15 @@ def extract_first_page_text(data: bytes, max_chars: int = 4000) -> str:
         return ""
 
 
+def extract_pages_text(data: bytes, max_pages: int = 300) -> list[str]:
+    """Text per sida — för käll-länkning (sida) i kravmatrisen (AP3)."""
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        return [(page.extract_text() or "") for page in reader.pages[:max_pages]]
+    except Exception:
+        return []
+
+
 def extract_all_text(data: bytes, max_chars: int = 50_000) -> str:
     """Returnera hela dokumentets text, trunkerad."""
     try:

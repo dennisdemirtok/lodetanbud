@@ -61,7 +61,13 @@ def classify(filename: str, content: bytes | None = None, content_text: str = ""
 
     content_text bör vara förstas sidan för PDF, eller hela filen för CSV/text.
     """
-    name = filename.strip()
+    # Namnet kan vara en relativ sökväg (zip-medlemmar, mappuppladdning).
+    # Ankrade mönster ("9. AF x.pdf", ritningskoder) matchas mot BASNAMNET;
+    # substring-signaler (MF-mappar som "10_Mängdförteckning/") mot hela
+    # sökvägen — annars bryter sökvägsprefixet alla ^-ankrade regexer.
+    name_path = filename.strip().replace("\\", "/").replace("::", "/")
+    name = name_path.rsplit("/", 1)[-1]
+    norm_path = _name_signal(name_path)
     norm = _name_signal(name)
     text_lower = content_text.lower() if content_text else ""
 
@@ -71,9 +77,7 @@ def classify(filename: str, content: bytes | None = None, content_text: str = ""
     # MF — explicit detection FÖRE alla andra (filnamn kan innehålla
     # "teknisk beskrivning" eftersom MF ofta levereras kombinerat).
     # "Mängdbeskrivning" är en vanlig synonym (golden set: Lorensberg).
-    # norm kan innehålla mappvägen — MF-mappar som "10. Ej prissatt
-    # Mängdförteckning/" ger signal även när filnamnet saknar den.
-    if "mangdforteckning" in norm or "mangdbeskrivning" in norm:
+    if "mangdforteckning" in norm_path or "mangdbeskrivning" in norm_path:
         if norm.endswith(".csv"):
             return FileKind("mf", "Mängdförteckning", 0.95)
         if norm.endswith((".xlsx", ".xlsm", ".xls")):
@@ -82,7 +86,7 @@ def classify(filename: str, content: bytes | None = None, content_text: str = ""
             return FileKind("mf", "Mängdförteckning (PDF)", 0.88)
 
     # À-prislista — separat dokumenttyp som inte är samma som MF
-    if "aprislista" in norm or "a-prislista" in norm or "à-prislista" in name.lower():
+    if "aprislista" in norm_path or "a-prislista" in norm_path or "à-prislista" in name_path.lower():
         return FileKind("aprislista", "À-prislista", 0.92)
 
     # CSV — sannolikt mängdförteckning även utan "mangd" i namnet

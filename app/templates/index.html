@@ -459,6 +459,7 @@
                   <p class="kalkylator-meta" id="kalkylatorMeta">—</p>
                 </div>
                 <div class="kalkylator-head-actions">
+                  <button type="button" class="btn btn-ghost btn-sm" id="kalkylatorKravBtn">Kravmatris</button>
                   <button type="button" class="btn btn-ghost btn-sm" id="kalkylatorAgentBtn">↗ Öppna i Agent</button>
                 </div>
               </div>
@@ -622,6 +623,48 @@
                   <span class="muted small" id="granskaCounts"></span>
                 </div>
                 <div id="granskaRowList" class="granska-row-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- =================== KRAVMATRIS (AP3) =================== -->
+          <section class="view view-krav" data-view="krav" hidden>
+            <div class="granska-head">
+              <div class="granska-head-text">
+                <p class="eyebrow">Kravmatris</p>
+                <h1 id="kravTitle">—</h1>
+                <p class="muted small" id="kravMeta">—</p>
+              </div>
+              <div class="granska-head-actions">
+                <button type="button" class="btn btn-ghost" id="kravKalkylatorBtn">Öppna kalkylator →</button>
+              </div>
+            </div>
+
+            <div class="granska-layout" id="kravLayout">
+              <div class="granska-pdf" id="kravPdfPane" hidden>
+                <div class="granska-pdf-toolbar">
+                  <button type="button" class="btn btn-ghost btn-sm" id="kravPdfPrev" aria-label="Föregående sida">‹</button>
+                  <span class="muted small" id="kravPdfLabel">—</span>
+                  <button type="button" class="btn btn-ghost btn-sm" id="kravPdfNext" aria-label="Nästa sida">›</button>
+                  <span class="muted small granska-pdf-filename" id="kravPdfFilename"></span>
+                </div>
+                <div class="granska-pdf-wrap" id="kravPdfWrap">
+                  <canvas id="kravPdfCanvas"></canvas>
+                </div>
+              </div>
+
+              <div class="granska-rows">
+                <div class="granska-filterbar" id="kravFilterbar">
+                  <button type="button" class="granska-filter active" data-kravfilter="alla">Alla</button>
+                  <button type="button" class="granska-filter" data-kravfilter="skall">Skall</button>
+                  <button type="button" class="granska-filter" data-kravfilter="bor">Bör</button>
+                  <button type="button" class="granska-filter" data-kravfilter="bilaga">Bilagor</button>
+                  <button type="button" class="granska-filter" data-kravfilter="utvardering">Utvärdering</button>
+                  <button type="button" class="granska-filter" data-kravfilter="formalia">Formalia</button>
+                  <button type="button" class="granska-filter" data-kravfilter="obesvarade">Obesvarade</button>
+                  <span class="muted small" id="kravCounts"></span>
+                </div>
+                <div id="kravList" class="krav-list"></div>
               </div>
             </div>
           </section>

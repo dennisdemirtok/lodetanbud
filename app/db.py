@@ -127,6 +127,28 @@ class MfLine(Base):
     meta: Mapped[dict] = mapped_column(JSON, default=dict)  # is_lump_sum, ama_section_title, _resources, line_number
 
 
+class Requirement(Base):
+    """Kravmatris (AP3) — varje krav är ett ordagrant, verifierat citat ur AF."""
+    __tablename__ = "requirements"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    case_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("cases.id", ondelete="CASCADE"), index=True
+    )
+    document_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    af_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    kind: Mapped[str] = mapped_column(String(16))  # skall|bor|utvardering|formalia|bilaga
+    text: Mapped[str] = mapped_column(Text)        # kravets lydelse — citat, inte parafras
+    response_format: Mapped[str | None] = mapped_column(String(16), nullable=True)  # fritext|bilaga|intyg|pris|checkbox
+    deadline: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {page, verified, match_ratio}
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)     # 0 = citat ej verifierat
+    status: Mapped[str] = mapped_column(String(16), default="unanswered")  # unanswered|drafted|answered|na
+    answer_draft_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # → drafts (AP5)
+    reviewed_by_user: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Job(Base):
     __tablename__ = "jobs"
 

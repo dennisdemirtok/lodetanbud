@@ -22,8 +22,10 @@ import zipfile
 from pathlib import Path
 
 from app import excel_parser, pdf_mf_parser
+from app.af_parser import split_af_sections
 from app.file_classifier import classify
 from app.parser import parse_csv_bytes
+from app.pdf_extractor import extract_pages_text
 
 GOLDEN = Path(__file__).parent / "golden"
 RESULTS = Path(__file__).parent / "results"
@@ -134,6 +136,71 @@ def run_mf_suite() -> list[dict]:
     return results
 
 
+def run_krav_suite() -> list[dict]:
+    """Deterministisk del av krav-suiten: hittas AF, hur många sektioner
+    splittas, vilka huvuddelar. Recall mot facit_krav.json (manuell
+    skall-kravlista) aktiveras när facit-filer finns."""
+    results = []
+    for case_dir in sorted(GOLDEN.iterdir()):
+        if not case_dir.is_dir():
+            continue
+        t0 = time.monotonic()
+        rec: dict = {"case": case_dir.name}
+        try:
+            files = _collect_files(case_dir)
+            af_cands = [
+                (n, d) for n, d in files
+                if classify(n).type == "af" and Path(n).suffix.lower() in (".pdf", ".docx")
+            ]
+            # PDF föredras (har sidnummer för käll-länkning)
+            af_cands.sort(key=lambda x: 0 if Path(x[0]).suffix.lower() == ".pdf" else 1)
+            rec["af_candidates"] = len(af_cands)
+            if not af_cands:
+                rec.update({"ok": False, "error": "ingen AF (pdf/docx) hittad av klassificeraren"})
+            else:
+                name, data = af_cands[0]
+                if Path(name).suffix.lower() == ".docx":
+                    from app.docx_extractor import extract_text as _docx_text
+                    text = _docx_text(data)
+                    pages = [text] if text else []
+                else:
+                    pages = extract_pages_text(data)
+                sections = split_af_sections(pages)
+                huvuddelar: dict[str, int] = {}
+                for s in sections:
+                    huvuddelar[s.code[:3]] = huvuddelar.get(s.code[:3], 0) + 1
+                rec.update({
+                    "ok": len(sections) > 0,
+                    "af_file": Path(name).name[:60],
+                    "pages": len(pages),
+                    "sections": len(sections),
+                    "huvuddelar": huvuddelar,
+                })
+                facit = case_dir / "facit_krav.json"
+                rec["has_facit"] = facit.exists()
+        except Exception as e:
+            rec.update({"ok": False, "error": str(e)[:200]})
+        rec["duration_s"] = round(time.monotonic() - t0, 1)
+        results.append(rec)
+    return results
+
+
+def _print_krav_table(results: list[dict]) -> None:
+    print(f"\n{'Case':<40} {'ok':>3} {'sidor':>6} {'sekt':>5}  huvuddelar")
+    print("-" * 88)
+    for r in results:
+        if r.get("ok"):
+            hd = " ".join(f"{k}:{v}" for k, v in (r.get("huvuddelar") or {}).items())
+            print(f"{r['case'][:40]:<40} {'✓':>3} {r['pages']:>6} {r['sections']:>5}  {hd}")
+        else:
+            print(f"{r['case'][:40]:<40} {'✗':>3}  → {r.get('error', '?')[:60]}")
+    ok = sum(1 for r in results if r.get("ok"))
+    print("-" * 88)
+    print(f"AF-sektioner splittade i {ok}/{len(results)} cases")
+    if not any(r.get("has_facit") for r in results):
+        print("(inga facit_krav.json ännu — recall mäts när manuella skall-kravlistor finns)")
+
+
 def _print_table(results: list[dict]) -> None:
     print(f"\n{'Case':<40} {'ok':>3} {'parser':>6} {'rader':>6} {'pris':>5} {'AMA':>4} {'låg':>4} {'resc':>4} {'tid':>5}")
     print("-" * 88)
@@ -176,15 +243,19 @@ def _diff_previous(results: list[dict], suite: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--suite", default="mf", choices=["mf"])
+    ap.add_argument("--suite", default="mf", choices=["mf", "krav"])
     args = ap.parse_args()
 
     if not GOLDEN.exists() or not any(GOLDEN.iterdir()):
         print("Golden settet är tomt — lägg förfrågningsunderlag i evals/golden/.")
         return 1
 
-    results = run_mf_suite()
-    _print_table(results)
+    if args.suite == "krav":
+        results = run_krav_suite()
+        _print_krav_table(results)
+    else:
+        results = run_mf_suite()
+        _print_table(results)
     _diff_previous(results, args.suite)
 
     RESULTS.mkdir(parents=True, exist_ok=True)

@@ -88,6 +88,25 @@ function navigate() {
     return;
   }
 
+  // Dynamisk route: #/krav/{case_id} — kravmatrisen (AP3)
+  const kravMatch = hash.match(/^#\/krav\/(.+)$/);
+  if (kravMatch) {
+    const caseId = decodeURIComponent(kravMatch[1]);
+    document.querySelectorAll('.view').forEach((v) => v.hidden = true);
+    const viewEl = document.querySelector('[data-view="krav"]');
+    if (viewEl) viewEl.hidden = false;
+    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    document.querySelector('.tab[data-tab="kalkylator"]')?.classList.add('active');
+    document.querySelectorAll('.sidebar-section').forEach((s) => s.hidden = true);
+    const sb = document.querySelector('.sidebar-section[data-sidebar="kalkylator"]');
+    if (sb) sb.hidden = false;
+    document.querySelectorAll('.sidebar-link').forEach((el) => el.classList.remove('active'));
+    document.querySelectorAll('.sidebar.open').forEach((s) => s.classList.remove('open'));
+    window.scrollTo({ top: 0 });
+    loadKrav(caseId);
+    return;
+  }
+
   const route = ROUTES[hash] || ROUTES['#/start'];
 
   // Visa rätt view
@@ -2192,8 +2211,10 @@ async function renderKalkylatorForCase(caseId) {
       }
     });
 
-    // "Öppna i Agent"-knapp
+    // "Öppna i Agent"-knapp + kravmatris
     document.getElementById('kalkylatorAgentBtn').onclick = () => { location.hash = '#/start'; };
+    const kravBtn = document.getElementById('kalkylatorKravBtn');
+    if (kravBtn) kravBtn.onclick = () => { location.hash = `#/krav/${encodeURIComponent(caseId)}`; };
 
     // Mängdförteckning-pane
     if (c.parsed_mf) {
@@ -3727,6 +3748,288 @@ async function granskaShowPage(n, bbox) {
   } else {
     hl.hidden = true;
   }
+}
+
+// ---------- KRAVMATRIS (AP3) ---------------------------------------------
+
+let kravState = {
+  caseId: null,
+  requirements: [],
+  counts: {},
+  huvuddelar: {},
+  filter: 'alla',
+  pdf: null,
+  pageNum: 1,
+  pageCount: 0,
+};
+
+const _KRAV_KIND_LABELS = {
+  skall: 'Skall', bor: 'Bör', bilaga: 'Bilaga',
+  utvardering: 'Utvärdering', formalia: 'Formalia',
+};
+
+async function loadKrav(caseId) {
+  kravState = {
+    ...kravState,
+    caseId, requirements: [], counts: {}, pdf: null,
+    pageNum: 1, pageCount: 0, filter: 'alla',
+  };
+
+  document.getElementById('kravTitle').textContent = 'Laddar …';
+  document.getElementById('kravMeta').textContent = '';
+  document.getElementById('kravList').innerHTML = '';
+  document.querySelectorAll('[data-kravfilter]').forEach((b) =>
+    b.classList.toggle('active', b.dataset.kravfilter === 'alla'));
+
+  bindKravOnce();
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/krav`);
+    if (!res.ok) throw new Error(res.status === 404 ? 'Anbudet hittades inte' : `HTTP ${res.status}`);
+    const d = await res.json();
+
+    kravState.requirements = d.requirements || [];
+    kravState.counts = d.counts || {};
+    kravState.huvuddelar = d.huvuddelar || {};
+
+    document.getElementById('kravTitle').textContent = d.project_name || caseId;
+    updateKravMeta();
+    renderKravList();
+
+    const pane = document.getElementById('kravPdfPane');
+    const layout = document.getElementById('kravLayout');
+    if (d.af_document && window.pdfjsLib) {
+      pane.hidden = false;
+      layout.classList.remove('no-pdf');
+      document.getElementById('kravPdfFilename').textContent = d.af_document.filename;
+      initKravPdf(d.af_document.url);
+    } else {
+      pane.hidden = true;
+      layout.classList.add('no-pdf');
+    }
+  } catch (e) {
+    document.getElementById('kravTitle').textContent = 'Fel';
+    document.getElementById('kravMeta').textContent = e.message;
+  }
+}
+
+function updateKravMeta() {
+  const c = kravState.counts || {};
+  const parts = [];
+  if (c.skall != null) {
+    const kvar = Math.max(0, (c.skall || 0) - (c.skall_answered || 0));
+    parts.push(`${c.skall} skall-krav · ${c.skall_answered || 0} besvarade · ${kvar} kvar`);
+  }
+  if (c.total != null) parts.push(`${c.total} krav totalt`);
+  if (c.unverified) parts.push(`⚠ ${c.unverified} ej verifierade`);
+  document.getElementById('kravMeta').textContent = parts.join(' · ') || '—';
+
+  const perKind = Object.entries(c.per_kind || {})
+    .map(([k, n]) => `${n} ${(_KRAV_KIND_LABELS[k] || k).toLowerCase()}`)
+    .join(' · ');
+  document.getElementById('kravCounts').textContent = perKind;
+}
+
+function recountKrav() {
+  const reqs = kravState.requirements;
+  const skall = reqs.filter((r) => r.kind === 'skall');
+  const per = {};
+  reqs.forEach((r) => { per[r.kind] = (per[r.kind] || 0) + 1; });
+  kravState.counts = {
+    total: reqs.length,
+    skall: skall.length,
+    skall_answered: skall.filter((r) => r.status !== 'unanswered').length,
+    answered: reqs.filter((r) => r.status !== 'unanswered').length,
+    unverified: reqs.filter((r) => !((r.source || {}).verified)).length,
+    per_kind: per,
+  };
+}
+
+function kravVisible(r) {
+  const f = kravState.filter;
+  if (f === 'alla') return true;
+  if (f === 'obesvarade') return r.status === 'unanswered';
+  return r.kind === f;
+}
+
+function renderKravList() {
+  const el = document.getElementById('kravList');
+  if (!el) return;
+
+  if (kravState.requirements.length === 0) {
+    el.innerHTML = '<div class="empty-state"><p>Inga krav extraherade för detta anbud.</p>'
+      + '<p class="muted small">Kravmatrisen byggs vid paketanalysen och kräver att Claude är konfigurerat på servern samt att paketet innehåller ett AF-dokument.</p></div>';
+    return;
+  }
+
+  const reqs = kravState.requirements.filter(kravVisible);
+  if (reqs.length === 0) {
+    el.innerHTML = '<div class="empty-state"><p>Inga krav i detta filter.</p></div>';
+    return;
+  }
+
+  // Gruppera per AF-huvuddel
+  const groups = new Map();
+  for (const r of reqs) {
+    const hd = (r.af_code || '').slice(0, 3).toUpperCase();
+    const key = kravState.huvuddelar[hd] ? hd : 'OVR';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+
+  const order = ['AFA', 'AFB', 'AFC', 'AFD', 'AFG', 'AFH', 'AFJ', 'OVR'];
+  const html = [];
+  for (const key of order) {
+    if (!groups.has(key)) continue;
+    const label = key === 'OVR' ? 'Övrigt / utan kod' : (kravState.huvuddelar[key] || key);
+    html.push(`<h3 class="krav-group-head">${escapeHtml(label)}</h3>`);
+    for (const r of groups.get(key)) {
+      html.push(renderKravRow(r));
+    }
+  }
+  el.innerHTML = html.join('');
+  bindKravRows(el);
+}
+
+function renderKravRow(r) {
+  const src = r.source || {};
+  const verified = !!src.verified;
+  return `
+    <div class="krav-row" data-req-id="${escapeAttr(r.id)}" data-status="${escapeAttr(r.status)}">
+      <span class="krav-kind-chip" data-kind="${escapeAttr(r.kind)}">${escapeHtml(_KRAV_KIND_LABELS[r.kind] || r.kind)}</span>
+      <div class="krav-body">
+        <div class="krav-code-line">
+          ${r.af_code ? `<span class="krav-code">${escapeHtml(r.af_code)}</span>` : ''}
+          <span class="krav-verify ${verified ? 'ok' : 'fail'}">${verified
+            ? `citat verifierat${src.page ? ' · s. ' + src.page : ''}`
+            : '⚠ citat ej verifierat'}</span>
+          ${r.response_format ? `<span class="krav-format">${escapeHtml(r.response_format)}</span>` : ''}
+          ${r.deadline ? `<span class="krav-deadline">⏱ ${escapeHtml(r.deadline)}</span>` : ''}
+        </div>
+        <p class="krav-quote">”${escapeHtml(r.text)}”</p>
+      </div>
+      <div class="krav-statuscell">
+        <select class="krav-status-select" data-req-id="${escapeAttr(r.id)}">
+          <option value="unanswered" ${r.status === 'unanswered' ? 'selected' : ''}>Obesvarad</option>
+          <option value="answered" ${r.status === 'answered' ? 'selected' : ''}>Besvarad</option>
+          <option value="na" ${r.status === 'na' ? 'selected' : ''}>Ej tillämplig</option>
+        </select>
+      </div>
+    </div>
+  `;
+}
+
+function bindKravRows(el) {
+  el.querySelectorAll('.krav-row').forEach((rowEl) => {
+    rowEl.addEventListener('click', (e) => {
+      if (e.target.closest('select')) return;
+      el.querySelectorAll('.krav-row.selected').forEach((x) => x.classList.remove('selected'));
+      rowEl.classList.add('selected');
+      const r = kravState.requirements.find((x) => x.id === rowEl.dataset.reqId);
+      if (r?.source?.page && kravState.pdf) kravShowPage(r.source.page);
+    });
+  });
+
+  el.querySelectorAll('.krav-status-select').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const reqId = sel.dataset.reqId;
+      try {
+        const res = await fetch(
+          `/api/cases/${encodeURIComponent(kravState.caseId)}/krav/${encodeURIComponent(reqId)}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: sel.value }),
+          },
+        );
+        if (!res.ok) {
+          const err = await safeJson(res);
+          throw new Error(err?.detail || `HTTP ${res.status}`);
+        }
+        const d = await res.json();
+        const idx = kravState.requirements.findIndex((x) => x.id === reqId);
+        if (idx >= 0) kravState.requirements[idx] = d.requirement;
+        recountKrav();
+        updateKravMeta();
+        renderKravList();
+      } catch (err) {
+        alert(`Kunde inte spara: ${err.message}`);
+      }
+    });
+  });
+}
+
+function bindKravOnce() {
+  document.querySelectorAll('[data-kravfilter]').forEach((btn) => {
+    if (btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', () => {
+      kravState.filter = btn.dataset.kravfilter;
+      document.querySelectorAll('[data-kravfilter]').forEach((b) =>
+        b.classList.toggle('active', b === btn));
+      renderKravList();
+    });
+  });
+
+  const kalkBtn = document.getElementById('kravKalkylatorBtn');
+  if (kalkBtn && !kalkBtn._bound) {
+    kalkBtn._bound = true;
+    kalkBtn.addEventListener('click', () => {
+      if (kravState.caseId) location.hash = `#/kalkylator/${encodeURIComponent(kravState.caseId)}`;
+    });
+  }
+
+  const prev = document.getElementById('kravPdfPrev');
+  const next = document.getElementById('kravPdfNext');
+  if (prev && !prev._bound) {
+    prev._bound = true;
+    prev.addEventListener('click', () => kravShowPage(kravState.pageNum - 1));
+  }
+  if (next && !next._bound) {
+    next._bound = true;
+    next.addEventListener('click', () => kravShowPage(kravState.pageNum + 1));
+  }
+}
+
+let _kravRenderTask = null;
+
+async function initKravPdf(url) {
+  try {
+    const lib = window.pdfjsLib;
+    lib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    kravState.pdf = await lib.getDocument(url).promise;
+    kravState.pageCount = kravState.pdf.numPages;
+    kravShowPage(1);
+  } catch (e) {
+    console.warn('AF-PDF kunde inte laddas:', e);
+    document.getElementById('kravPdfPane').hidden = true;
+    document.getElementById('kravLayout').classList.add('no-pdf');
+  }
+}
+
+async function kravShowPage(n) {
+  const st = kravState;
+  if (!st.pdf) return;
+  n = Math.max(1, Math.min(n, st.pageCount));
+  st.pageNum = n;
+
+  const page = await st.pdf.getPage(n);
+  const wrap = document.getElementById('kravPdfWrap');
+  const canvas = document.getElementById('kravPdfCanvas');
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.max(0.3, (wrap.clientWidth - 4) / base.width);
+  const viewport = page.getViewport({ scale });
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  if (_kravRenderTask) {
+    try { _kravRenderTask.cancel(); } catch {}
+  }
+  _kravRenderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport });
+  try { await _kravRenderTask.promise; } catch { return; }
+
+  document.getElementById('kravPdfLabel').textContent = `Sida ${n} / ${st.pageCount}`;
 }
 
 // ---------- HELPERS ------------------------------------------------------

@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 
+from app import af_parser
 from app import agent as lodet_agent
 from app import agent_insights
 from app import case_archive
+from app import docx_extractor
 from app import excel_parser
 from app import file_classifier
 from app import lesson_extractor
@@ -75,11 +77,12 @@ def classify_one(filename: str, data: bytes) -> tuple[lodet_agent.FileInfo, dict
 
 def _classify_batch(
     pairs: list[tuple[str, bytes, str]],
-) -> tuple[list[lodet_agent.FileInfo], dict | None, str, list[dict]]:
+) -> tuple[list[lodet_agent.FileInfo], dict | None, str, list[dict], list[str]]:
     """Klassificera alla filer + extrahera AF-text. Synkron — körs i tråd.
 
-    Returnerar (file_infos, parsed_mf, af_text, rescue_pages). Excel/CSV-MF
-    föredras; saknas sådan provas PDF-MF via pdfplumber (AP2)."""
+    Returnerar (file_infos, parsed_mf, af_text, rescue_pages, af_pages).
+    Excel/CSV-MF föredras; saknas sådan provas PDF-MF via pdfplumber (AP2).
+    af_pages (text per sida) driver kravmatrisen (AP3)."""
     file_infos: list[lodet_agent.FileInfo] = []
     parsed_mf: dict | None = None
     mf_pdf_candidates: list[bytes] = []
@@ -110,15 +113,27 @@ def _classify_batch(
                 rescue_pages = rescue
 
     af_text = ""
+    af_pages: list[str] = []
     for info in file_infos:
-        if info.type == "af" and info.filename.lower().endswith(".pdf"):
-            data = data_by_name.get(info.filename)
-            if data:
-                af_text = pdf_extractor.extract_all_text(data, max_chars=50_000)
-                if af_text:
-                    break
+        if info.type != "af":
+            continue
+        data = data_by_name.get(info.filename)
+        if not data:
+            continue
+        lower = info.filename.lower()
+        if lower.endswith(".pdf"):
+            af_pages = pdf_extractor.extract_pages_text(data)
+        elif lower.endswith(".docx"):
+            # docx saknar sidor — hela texten som "en sida" (källa = s. 1)
+            text = docx_extractor.extract_text(data)
+            af_pages = [text] if text else []
+        else:
+            continue
+        af_text = "\n".join(af_pages)[:50_000]
+        if af_text.strip():
+            break
 
-    return file_infos, parsed_mf, af_text, rescue_pages
+    return file_infos, parsed_mf, af_text, rescue_pages, af_pages
 
 
 @register("parse_package")
@@ -142,7 +157,7 @@ async def run_parse_package(job) -> dict:
         pairs.append((ref["filename"], p.read_bytes(), ref["path"]))
 
     # CPU-tungt (pypdf/openpyxl/pdfplumber) i tråd så event-loopen inte blockeras
-    file_infos, parsed_mf, af_text, rescue_pages = await asyncio.to_thread(_classify_batch, pairs)
+    file_infos, parsed_mf, af_text, rescue_pages, af_pages = await asyncio.to_thread(_classify_batch, pairs)
 
     # LLM-rescue: sidor där PDF-tabellextraktionen misslyckades
     if rescue_pages and llm.is_configured():
@@ -187,6 +202,27 @@ async def run_parse_package(job) -> dict:
     except Exception:
         insights = {"observations": [], "questions": [], "vendor_templates": []}
 
+    # Kravmatris (AP3): hela AF → källänkade, citatverifierade krav
+    try:
+        matrix = await af_parser.extract_matrix(af_pages, case_id=case_id)
+    except Exception:
+        matrix = []
+
+    if matrix:
+        skall = sum(1 for r in matrix if r.get("kind") == "skall")
+        unverified = sum(1 for r in matrix if not (r.get("source") or {}).get("verified"))
+        body = f"{skall} skall-krav att besvara"
+        if unverified:
+            body += f" · {unverified} citat kunde inte verifieras och är flaggade"
+        analysis["recommendations"].insert(0, {
+            "id": "kravmatris",
+            "priority": 1,
+            "title": f"{len(matrix)} krav extraherade ur AF",
+            "body": body,
+            "action_label": "Öppna kravmatrisen",
+            "action_route": f"#/krav/{case_id}",
+        })
+
     await case_archive.update_case_full(
         case_id,
         summary=analysis["summary"],
@@ -197,6 +233,14 @@ async def run_parse_package(job) -> dict:
         insights=insights,
         analysis=analysis,
     )
+
+    # Kravmatrisen skrivs efter update_case_full (documents-raderna måste
+    # finnas för AF-dokument-kopplingen)
+    if matrix:
+        try:
+            await case_archive.replace_requirements(case_id, matrix)
+        except Exception:
+            pass
 
     # EXTRACTING → NEEDS_REVIEW om någon rad ligger under tröskeln,
     # annars direkt till CALCULATING
@@ -220,6 +264,7 @@ async def run_parse_package(job) -> dict:
         "low_confidence_count": low_conf,
         "lesson_count": len(lessons),
         "required_count": len(required_docs),
+        "requirement_count": len(matrix),
         "state": target,
     }
 

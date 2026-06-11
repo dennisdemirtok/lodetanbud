@@ -375,6 +375,49 @@ async def update_parsed_mf(case_id: str, parsed_mf: dict) -> bool:
         return True
 
 
+# ---- Kravmatris (AP3) -------------------------------------------------------
+
+async def replace_requirements(case_id: str, reqs: list[dict]) -> int:
+    """Skriv om kravmatrisen för ett case (idempotent). Kopplar kraven till
+    AF-PDF-dokumentet om ett finns."""
+    from app.db import Document, Requirement
+    from sqlalchemy import select as _select
+
+    async with SessionLocal() as session:
+        af_doc = (await session.execute(
+            _select(Document).where(
+                Document.case_id == case_id,
+                Document.doc_type == "af",
+            )
+        )).scalars().first()
+        af_doc_id = af_doc.id if af_doc else None
+
+        await session.execute(sa_delete(Requirement).where(Requirement.case_id == case_id))
+        for i, r in enumerate(reqs):
+            session.add(Requirement(
+                id=new_id("req"),
+                case_id=case_id,
+                document_id=af_doc_id,
+                position=r.get("position", i),
+                af_code=r.get("af_code"),
+                kind=r.get("kind") or "skall",
+                text=r.get("text") or "",
+                response_format=r.get("response_format"),
+                deadline=r.get("deadline"),
+                source=r.get("source"),
+                confidence=float(r.get("confidence") or 0.0),
+                status="unanswered",
+            ))
+        if reqs:
+            await log_event(session, case_id, "requirements_extracted", {
+                "count": len(reqs),
+                "skall": sum(1 for r in reqs if r.get("kind") == "skall"),
+                "verified": sum(1 for r in reqs if (r.get("source") or {}).get("verified")),
+            })
+        await session.commit()
+        return len(reqs)
+
+
 # ---- Events ----------------------------------------------------------------
 
 async def list_events(case_id: str, limit: int = 100) -> list[dict]:

@@ -650,6 +650,97 @@ async def api_review_complete(case_id: str) -> JSONResponse:
         })
 
 
+# --- Kravmatris (AP3) -------------------------------------------------------
+
+def _requirement_dict(r: lodet_db.Requirement) -> dict:
+    return {
+        "id": r.id,
+        "position": r.position,
+        "af_code": r.af_code,
+        "kind": r.kind,
+        "text": r.text,
+        "response_format": r.response_format,
+        "deadline": r.deadline,
+        "source": r.source,
+        "confidence": r.confidence,
+        "status": r.status,
+        "reviewed_by_user": r.reviewed_by_user,
+    }
+
+
+@app.get("/api/cases/{case_id}/krav")
+async def api_case_krav(case_id: str) -> JSONResponse:
+    """Kravmatrisen: källänkade krav grupperade per AF-huvuddel + räknare."""
+    from app.af_parser import HUVUDDELAR
+
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+        rows = (await session.execute(
+            sa_select(lodet_db.Requirement)
+            .where(lodet_db.Requirement.case_id == case_id)
+            .order_by(lodet_db.Requirement.position)
+        )).scalars().all()
+        docs = (await session.execute(
+            sa_select(lodet_db.Document).where(
+                lodet_db.Document.case_id == case_id,
+                lodet_db.Document.doc_type == "af",
+            )
+        )).scalars().all()
+
+    af_doc = next((d for d in docs if (d.storage_path or "").lower().endswith(".pdf")), None)
+
+    reqs = [_requirement_dict(r) for r in rows]
+    skall = [r for r in reqs if r["kind"] == "skall"]
+    answered = [r for r in reqs if r["status"] in ("answered", "na")]
+    counts = {
+        "total": len(reqs),
+        "skall": len(skall),
+        "skall_answered": sum(1 for r in skall if r["status"] in ("answered", "na")),
+        "answered": len(answered),
+        "unverified": sum(1 for r in reqs if not (r.get("source") or {}).get("verified")),
+        "per_kind": {},
+    }
+    for r in reqs:
+        counts["per_kind"][r["kind"]] = counts["per_kind"].get(r["kind"], 0) + 1
+
+    return JSONResponse({
+        "case_id": case_id,
+        "state": case.state,
+        "project_name": case.project_name,
+        "counts": counts,
+        "huvuddelar": HUVUDDELAR,
+        "requirements": reqs,
+        "af_document": {
+            "id": af_doc.id,
+            "filename": af_doc.filename,
+            "url": f"/api/cases/{case_id}/file/{af_doc.id}",
+        } if af_doc else None,
+    })
+
+
+@app.put("/api/cases/{case_id}/krav/{req_id}")
+async def api_case_krav_update(case_id: str, req_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Uppdatera status på ett krav (unanswered|answered|na)."""
+    status = payload.get("status")
+    if status not in ("unanswered", "answered", "na"):
+        raise HTTPException(status_code=400, detail="status måste vara unanswered, answered eller na")
+
+    async with lodet_db.SessionLocal() as session:
+        row = await session.get(lodet_db.Requirement, req_id)
+        if row is None or row.case_id != case_id:
+            raise HTTPException(status_code=404, detail="Kravet hittades inte")
+        row.status = status
+        row.reviewed_by_user = True
+        await lodet_db.log_event(session, case_id, "user_edit", {
+            "what": "requirement_status", "req_id": req_id, "status": status,
+        })
+        await session.commit()
+        await session.refresh(row)
+        return JSONResponse({"requirement": _requirement_dict(row)})
+
+
 @app.get("/api/cases/{case_id}/file/{doc_id}")
 async def api_case_file(case_id: str, doc_id: str) -> FileResponse:
     """Servera en lagrad originalfil (för PDF-panelen i granskningsvyn)."""
