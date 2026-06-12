@@ -1501,38 +1501,80 @@ async def api_ue_email(
 
 @app.get("/api/dashboard")
 async def api_dashboard() -> JSONResponse:
-    """Statisk dashboard-data för MVP. I produktion: aggregeras från DB."""
-    return JSONResponse(
-        {
-            "stats": {
-                "active_bids": 3,
-                "total_bid_value_sek": 27_842_000,
-                "win_rate_pct": 42,
-                "ama_codes_in_library": len(ama_catalog.all_codes()),
-            },
-            "recent_activity": [
-                {
-                    "type": "parse",
-                    "title": "VÄG 875, GC SUNDBORN parsad",
-                    "subtitle": "48 rader · 1 687 336 kr",
-                    "timestamp": "2026-04-30 16:42",
-                },
-                {
-                    "type": "win",
-                    "title": "Belysning Industrigatan vunnen",
-                    "subtitle": "Härnösands kommun · 2 410 000 kr",
-                    "timestamp": "2026-04-28 09:15",
-                },
-                {
-                    "type": "submit",
-                    "title": "GC-väg Skogsbacken inlämnad",
-                    "subtitle": "Sollefteå kommun · 4 800 000 kr",
-                    "timestamp": "2026-04-27 14:00",
-                },
-            ],
-            "upcoming_deadlines": [
-                {"project": "Vägbelysning Rv 84", "customer": "Trafikverket", "due": "2026-05-12"},
-                {"project": "Renovering Storgatan", "customer": "Bollnäs kommun", "due": "2026-05-19"},
-            ],
-        }
-    )
+    """Dashboard-data aggregerad från databasen (cases, events, observationer)."""
+    from sqlalchemy import func
+
+    ACTIVE_STATES = {
+        case_states.CALCULATING, case_states.NEEDS_REVIEW,
+        case_states.DRAFTING, case_states.FORMALIA_CHECK, case_states.READY,
+    }
+
+    async with lodet_db.SessionLocal() as session:
+        cases = (await session.execute(
+            sa_select(lodet_db.Case).order_by(lodet_db.Case.created_at.desc())
+        )).scalars().all()
+        obs_count = (await session.execute(
+            sa_select(func.count()).select_from(lodet_db.PriceObservation)
+        )).scalar_one()
+        recent_events = (await session.execute(
+            sa_select(lodet_db.Event).order_by(lodet_db.Event.id.desc()).limit(40)
+        )).scalars().all()
+
+    active = [c for c in cases if c.state in ACTIVE_STATES]
+    awarded = [c for c in cases if c.state == case_states.AWARDED]
+    lost = [c for c in cases if c.state == case_states.LOST]
+    decided = len(awarded) + len(lost)
+    win_rate = round(100 * len(awarded) / decided) if decided else 0
+    total_active_value = sum(c.total_amount_sek or 0 for c in active)
+
+    # Senaste aktivitet ur events (state_change, analysis_written, user_edit)
+    case_by_id = {c.id: c for c in cases}
+    activity = []
+    _kinds = {
+        "case_created": ("parse", "Nytt anbud skapat"),
+        "analysis_written": ("parse", "Paket analyserat"),
+        "state_change": ("submit", "Statusbyte"),
+        "formalia_passed": ("win", "Formaliakontroll godkänd"),
+        "historic_prices_imported": ("parse", "Prishistorik importerad"),
+    }
+    for e in recent_events:
+        meta = _kinds.get(e.kind)
+        if not meta:
+            continue
+        c = case_by_id.get(e.case_id) if e.case_id else None
+        proj = (c.project_name or c.source_name) if c else (e.data or {}).get("project", "—")
+        sub = ""
+        if e.kind == "state_change":
+            sub = f"→ {case_states.LABELS.get((e.data or {}).get('to'), '')}"
+        elif e.kind == "analysis_written":
+            sub = f"{(e.data or {}).get('line_count', 0)} rader"
+        elif e.kind == "historic_prices_imported":
+            sub = f"{(e.data or {}).get('count', 0)} prisrader"
+        activity.append({
+            "type": meta[0],
+            "title": f"{proj} — {meta[1]}",
+            "subtitle": sub,
+            "timestamp": (e.at or "").replace("T", " ")[:16],
+        })
+        if len(activity) >= 6:
+            break
+
+    # Kommande deadlines ur aktiva cases med bid_due_at
+    deadlines = []
+    for c in active:
+        due = c.bid_due_at or ((c.meta or {}).get("mf_metadata") or {}).get("bid_due_at")
+        if due:
+            deadlines.append({"project": c.project_name or c.source_name, "customer": c.customer or "—", "due": str(due)[:10]})
+    deadlines.sort(key=lambda d: d["due"])
+
+    return JSONResponse({
+        "stats": {
+            "active_bids": len(active),
+            "total_bid_value_sek": round(total_active_value),
+            "win_rate_pct": win_rate,
+            "ama_codes_in_library": len(ama_catalog.all_codes()),
+            "price_observations": obs_count,
+        },
+        "recent_activity": activity,
+        "upcoming_deadlines": deadlines[:5],
+    })

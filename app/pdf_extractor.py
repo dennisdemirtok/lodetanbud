@@ -68,12 +68,33 @@ def extract_metadata(data: bytes) -> dict:
 
 # ---- Mönsterextraktion från text ---------------------------------------
 
-PROJECT_NAME_PATTERN = re.compile(r"(?:projekt|objekt)[:\s]+([A-ZÅÄÖ][^\n]{4,80})", re.IGNORECASE)
-DOCUMENT_NUMBER_PATTERN = re.compile(r"(?:dokument(?:nr|nummer)?|handlings?[\-\s]?nr)[:\s]+([\w\-\.]{3,20})", re.IGNORECASE)
+# Kräver kolon mellan etikett och värde — "projekt: Namn", inte "PROJEKT  DATUM"
+# i en tabell-header (det gav DATUM-buggen).
+PROJECT_NAME_PATTERN = re.compile(r"(?:projekt|objekt)\s*:\s*([A-ZÅÄÖ][^\n]{4,80})", re.IGNORECASE)
+DOCUMENT_NUMBER_PATTERN = re.compile(r"(?:dokument(?:nr|nummer)?|handlings?[\-\s]?nr)\s*:\s*([\w\-\.]{3,20})", re.IGNORECASE)
 DATE_PATTERN = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
 ANBUDSDAG_PATTERN = re.compile(r"(?:anbud|inl[äa]mn[a-z]+)[^.\n]{0,80}?(\d{1,2}\s+\w+\s+20\d{2}|20\d{2}-\d{2}-\d{2})", re.IGNORECASE)
-KUND_PATTERN = re.compile(r"(?:bestäl{1,2}are|kund|uppdragsgivare)[:\s]+([A-ZÅÄÖ][^\n]{4,60})", re.IGNORECASE)
+KUND_PATTERN = re.compile(r"(?:bestäl{1,2}are|kund|uppdragsgivare)\s*:\s*([A-ZÅÄÖ][^\n]{4,60})", re.IGNORECASE)
 AMOUNT_PATTERN = re.compile(r"(\d{1,3}(?:\s\d{3})+|\d{4,})\s*(?:kr|sek)", re.IGNORECASE)
+
+# Etikettord som aldrig är ett projekt-/kundnamn (skydd mot tabell-headers)
+_LABEL_WORDS = {
+    "datum", "dokumentnummer", "dokumentnr", "handläggare", "handlaggare",
+    "uppdragsnummer", "uppdragsnr", "projekt", "objekt", "status", "sida",
+    "beställare", "bestallare", "kund", "innehåll", "innehall", "bet", "rev",
+}
+
+
+def _clean_label_value(value: str) -> str | None:
+    """Trimma ett extraherat värde och förkasta om det är ett etikettord."""
+    v = re.sub(r"\s+", " ", (value or "")).strip(" :\t")
+    if not v or v.lower() in _LABEL_WORDS:
+        return None
+    # Förkasta om värdet börjar med ett etikettord (header-rad fångad)
+    first = v.split()[0].lower().rstrip(":") if v.split() else ""
+    if first in _LABEL_WORDS:
+        return None
+    return v
 
 
 def sniff_metadata_from_text(text: str) -> dict:
@@ -81,7 +102,9 @@ def sniff_metadata_from_text(text: str) -> dict:
     found: dict = {}
 
     if m := PROJECT_NAME_PATTERN.search(text):
-        found["project_name"] = m.group(1).strip()
+        val = _clean_label_value(m.group(1))
+        if val:
+            found["project_name"] = val
     if m := DOCUMENT_NUMBER_PATTERN.search(text):
         found["document_number"] = m.group(1).strip()
     if m := DATE_PATTERN.search(text):
@@ -89,7 +112,9 @@ def sniff_metadata_from_text(text: str) -> dict:
     if m := ANBUDSDAG_PATTERN.search(text):
         found["bid_due_at"] = m.group(1)
     if m := KUND_PATTERN.search(text):
-        found["customer_name"] = m.group(1).strip()
+        val = _clean_label_value(m.group(1))
+        if val:
+            found["customer_name"] = val
     if m := AMOUNT_PATTERN.search(text):
         amount_str = m.group(1).replace(" ", "")
         try:

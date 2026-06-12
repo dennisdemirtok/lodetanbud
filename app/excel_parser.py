@@ -133,10 +133,30 @@ _METADATA_LABELS = {
 }
 
 
+# Värden som aldrig är riktiga metadata-värden (en annan etikett fångad)
+_LABEL_VALUES = set(_METADATA_LABELS) | {"STATUS", "SIDA", "BET", "REV", "INNEHÅLL"}
+
+
+def _accept_value(raw: Any, target: str, meta: dict) -> None:
+    """Sätt meta[target] från raw om värdet är giltigt och inte en etikett."""
+    value = _to_str(raw)
+    if not value or value in {"-", ":"}:
+        return
+    if _norm_label(value) in _LABEL_VALUES:
+        return  # värdet är självt en etikett (samma-rad-header)
+    if target == "total_amount":
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            meta[target] = float(raw)
+        else:
+            meta[target] = parse_swedish_number(value)
+    elif meta.get(target) is None:
+        meta[target] = value
+
+
 def _extract_metadata(rows: list[list[Any]]) -> dict:
-    """Plocka projekt/dokument-metadata. Letar BARA på raden NEDANFÖR
-    label-cellen — undviker att felaktigt plocka 'DOKUMENTNUMMER' som
-    värde för 'PROJEKT' när labels står på samma rad."""
+    """Plocka projekt/dokument-metadata. Värdet ligger antingen på raden
+    NEDANFÖR (vanligast) eller i NÄSTA CELL till höger på samma rad.
+    Båda förkastar värden som själva är etikettord (DATUM-buggen)."""
     meta: dict = {
         "project_name": None,
         "document_number": None,
@@ -149,24 +169,17 @@ def _extract_metadata(rows: list[list[Any]]) -> dict:
 
     for row_idx, row in enumerate(rows[:15]):
         for col_idx, cell in enumerate(row):
-            label = _norm_label(cell)
-            target = _METADATA_LABELS.get(label)
-            if not target:
+            target = _METADATA_LABELS.get(_norm_label(cell))
+            if not target or meta.get(target) is not None:
                 continue
-            # Värdet är ALLTID på raden under, samma kolumn
+            # Värde nedanför (samma kolumn)
             if row_idx + 1 < len(rows):
-                next_row = rows[row_idx + 1]
-                if col_idx < len(next_row):
-                    raw = next_row[col_idx]
-                    value = _to_str(raw)
-                    if value and value not in {"-", ":"}:
-                        if target == "total_amount":
-                            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-                                meta[target] = float(raw)
-                            else:
-                                meta[target] = parse_swedish_number(value)
-                        elif meta[target] is None:
-                            meta[target] = value
+                below = rows[row_idx + 1]
+                if col_idx < len(below):
+                    _accept_value(below[col_idx], target, meta)
+            # Fallback: värde i nästa cell till höger (samma-rad-layout)
+            if meta.get(target) is None and col_idx + 1 < len(row):
+                _accept_value(row[col_idx + 1], target, meta)
 
     return meta
 

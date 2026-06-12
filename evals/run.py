@@ -185,6 +185,118 @@ def run_krav_suite() -> list[dict]:
     return results
 
 
+def run_pris_suite() -> list[dict]:
+    """Pris-MAPE via leave-one-project-out på MAP-kalkylernas nettopriser.
+
+    Bygger prisobservationer ur alla kalkyler, sedan för varje post:
+    median av samma AMA-kod i ANDRA projekt → jämför mot postens faktiska
+    nettopris → MAPE. Mäter prismotorns exakt-kod-steg på riktig data."""
+    import statistics
+    from app.map_kalkyl import have_mdbtools, parse_kalkyl
+
+    if not have_mdbtools():
+        return [{"case": "(mdbtools saknas — kan ej köra pris-suite)", "ok": False}]
+
+    # Samla observationer: ama_code → [(project, unit_price)]
+    by_code: dict[str, list[tuple[str, float]]] = {}
+    per_case_posts: dict[str, list[dict]] = {}
+    for case_dir in sorted(GOLDEN.iterdir()):
+        if not case_dir.is_dir():
+            continue
+        mdbs = list(case_dir.rglob("*.mdbklk"))
+        if not mdbs:
+            continue
+        main = max(mdbs, key=lambda p: p.stat().st_size)
+        try:
+            parsed = parse_kalkyl(main)
+        except Exception:
+            continue
+        posts = [p for p in parsed["posts"] if p.get("ama_code") and p.get("unit_price", 0) > 0]
+        per_case_posts[case_dir.name] = posts
+        for p in posts:
+            by_code.setdefault(p["ama_code"], []).append((case_dir.name, p["unit_price"]))
+
+    results = []
+    for case_name, posts in per_case_posts.items():
+        errors = []
+        covered = 0
+        for p in posts:
+            others = [price for (proj, price) in by_code.get(p["ama_code"], []) if proj != case_name]
+            if not others:
+                continue
+            pred = statistics.median(others)
+            actual = p["unit_price"]
+            if actual > 0:
+                errors.append(abs(pred - actual) / actual)
+                covered += 1
+        mape = round(100 * statistics.mean(errors), 1) if errors else None
+        median_ape = round(100 * statistics.median(errors), 1) if errors else None
+        results.append({
+            "case": case_name,
+            "ok": mape is not None,
+            "posts": len(posts),
+            "covered": covered,
+            "coverage_pct": round(100 * covered / len(posts)) if posts else 0,
+            "mape": mape,
+            "median_ape": median_ape,
+        })
+    return results
+
+
+def _print_pris_table(results: list[dict]) -> None:
+    print(f"\n{'Case':<40} {'poster':>7} {'täckt':>6} {'täck%':>6} {'MAPE%':>7} {'median%':>8}")
+    print("-" * 80)
+    all_mape = []
+    for r in results:
+        if r.get("ok"):
+            print(f"{r['case'][:40]:<40} {r['posts']:>7} {r['covered']:>6} {r['coverage_pct']:>5}% {r['mape']:>6} {r['median_ape']:>8}")
+            all_mape.append(r["mape"])
+        else:
+            print(f"{r['case'][:40]:<40}  → {r.get('case','').startswith('(') and r['case'] or 'ingen data'}")
+    print("-" * 80)
+    median_apes = [r["median_ape"] for r in results if r.get("ok") and r.get("median_ape") is not None]
+    if median_apes:
+        import statistics
+        print(f"PRIMÄRT MÅTT — median-APE över cases: {statistics.median(median_apes):.0f}% "
+              f"(typiskt avstånd mellan median-av-andra-projekt och faktiskt pris)")
+        print("MAPE-kolumnen domineras av poster med pytteskt pris (÷ litet tal) — använd median-APE.")
+        print("Tolkning: ~85% median-APE visar att AMA-kod ensam är en GROV prediktor — därför")
+        print("visar motorn spann + n + källcase, inte en punktsiffra. Förbättras av enhets-/")
+        print("region-viktning och beskrivningslikhet (kaskadsteg 4). Följs över tid.")
+
+
+def run_afb_suite() -> list[dict]:
+    """AFB-strukturcheck: [SAKNAS]-markörer välformade, schema giltigt.
+    Recall-måttet (fakta i kontext men markerad saknad = fel) kräver
+    labelade (krav, fakta, facit) — väntar på facit_afb.json."""
+    from app import answer_generator
+    import re
+    checks = []
+    # Strukturell sanity: SAKNAS_RE fångar markörerna
+    samples = [
+        ("Vi har [SAKNAS: omsättning] Mkr.", 1),
+        ("ISO 9001 och [SAKNAS: antal år] erfarenhet av [SAKNAS: typ].", 2),
+        ("Komplett svar utan luckor.", 0),
+    ]
+    for text, expected in samples:
+        found = len(answer_generator.SAKNAS_RE.findall(text))
+        checks.append({"sample": text[:40], "expected": expected, "found": found, "ok": found == expected})
+    facit_exists = any((GOLDEN / d.name / "facit_afb.json").exists()
+                       for d in GOLDEN.iterdir() if d.is_dir())
+    return [{"checks": checks, "has_facit": facit_exists}]
+
+
+def _print_afb_table(results: list[dict]) -> None:
+    r = results[0]
+    print("\nAFB-svarsstruktur ([SAKNAS]-markörhantering):")
+    for c in r["checks"]:
+        print(f"  {'✓' if c['ok'] else '✗'} {c['sample']:<42} förväntat {c['expected']}, hittade {c['found']}")
+    ok = all(c["ok"] for c in r["checks"])
+    print(f"\n{'✓ alla strukturchecks OK' if ok else '✗ strukturfel'}")
+    if not r["has_facit"]:
+        print("(facit_afb.json saknas — recall mot labelade svar aktiveras när facit finns)")
+
+
 def _print_krav_table(results: list[dict]) -> None:
     print(f"\n{'Case':<40} {'ok':>3} {'sidor':>6} {'sekt':>5}  huvuddelar")
     print("-" * 88)
@@ -243,7 +355,7 @@ def _diff_previous(results: list[dict], suite: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--suite", default="mf", choices=["mf", "krav"])
+    ap.add_argument("--suite", default="mf", choices=["mf", "krav", "pris", "afb"])
     args = ap.parse_args()
 
     if not GOLDEN.exists() or not any(GOLDEN.iterdir()):
@@ -253,6 +365,12 @@ def main() -> int:
     if args.suite == "krav":
         results = run_krav_suite()
         _print_krav_table(results)
+    elif args.suite == "pris":
+        results = run_pris_suite()
+        _print_pris_table(results)
+    elif args.suite == "afb":
+        results = run_afb_suite()
+        _print_afb_table(results)
     else:
         results = run_mf_suite()
         _print_table(results)
