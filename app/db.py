@@ -198,6 +198,24 @@ class PriceObservation(Base):
     )
 
 
+class AnswerLibrary(Base):
+    """Svarsbibliotek (AP5) — godkända AFB-fritextsvar återanvänds på
+    liknande krav. Likhet körs på requirement_text (pg_trgm/difflib);
+    meta.embedding reserverad för pgvector när embedding-nyckel finns."""
+    __tablename__ = "answer_library"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    af_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    requirement_text: Mapped[str] = mapped_column(Text)   # kravets lydelse
+    answer_text: Mapped[str] = mapped_column(Text)        # det godkända svaret
+    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = mapped_column(String(32))
+    updated_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_case_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class Event(Base):
     __tablename__ = "events"
 

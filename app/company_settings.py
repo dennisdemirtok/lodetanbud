@@ -27,7 +27,22 @@ _DEFAULTS: dict = {
     "address": "",
     "default_customer": "",
     "logo_url": "",
+    # Företagsfakta för AFB-svarsgenerering (AP5) — det svaren får citera.
+    # Tomma fält → [SAKNAS]-markörer i utkasten, aldrig påhittade fakta.
+    "omsattning_msek": "",        # årsomsättning
+    "antal_anstallda": "",
+    "certifikat": "",             # t.ex. "ISO 9001, ISO 14001, BF9K"
+    "referensprojekt": "",        # fritext: lista över relevanta referensobjekt
+    "nyckelpersoner": "",         # platschef/arbetsledare med erfarenhet
+    "ue_policy": "",              # hur företaget arbetar med underentreprenörer
 }
+
+
+# Vilka fält som är "fakta" (vs kontaktuppgifter) — styr svarsgeneratorns kontext
+FACT_FIELDS = (
+    "omsattning_msek", "antal_anstallda", "certifikat",
+    "referensprojekt", "nyckelpersoner", "ue_policy",
+)
 
 
 def _ensure_path() -> Path:

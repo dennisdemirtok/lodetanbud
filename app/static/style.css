@@ -3801,3 +3801,178 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   .topbar { padding: 0 14px; gap: 14px; }
   .brand-name { display: none; }
 }
+
+/* ========================================================================
+   AP5 — företagsfakta, AFB-svar, formaliagrind, slutför-flöde
+   ======================================================================== */
+
+/* Företagsformulärets fakta-sektion */
+.company-form-section {
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  color: var(--lodbla);
+  margin: 18px 0 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--linjegra);
+}
+.company-form-hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+.company-form-hint code {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background: #F0DDD3;
+  color: var(--tegel);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.company-form textarea {
+  font: inherit;
+  font-size: 0.92rem;
+  padding: 8px 12px;
+  border: 1px solid var(--linjegra);
+  border-radius: var(--radius-sm);
+  background: var(--krita);
+  color: var(--jarn);
+  outline: none;
+  resize: vertical;
+  width: 100%;
+}
+.company-form textarea:focus { border-color: var(--lodbla); }
+
+/* Krav-svarsknapp + flagga i kravmatrisen */
+.krav-answer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.krav-answer-flag {
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.krav-answer-flag.ok { color: var(--salvia); }
+.krav-answer-flag.gaps { color: var(--tegel); }
+
+/* AFB-svarsmodal */
+.answer-modal-quote {
+  font-size: 0.92rem;
+  color: var(--jarn);
+  background: var(--bg-sidebar);
+  border-left: 3px solid var(--lodbla);
+  padding: 10px 14px;
+  margin: 0 0 12px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  line-height: 1.5;
+}
+.answer-modal-missing {
+  background: #F0DDD3;
+  color: var(--tegel);
+  font-size: 0.84rem;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.answer-modal-sources {
+  margin: 8px 0 0;
+  font-style: italic;
+}
+.saknas-mark {
+  background: #F0DDD3;
+  color: var(--tegel);
+  padding: 0 2px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+/* Slutför-flöde (state-stegen) */
+.slutfor-flow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.flow-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.flow-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--linjegra);
+  flex-shrink: 0;
+}
+.flow-label {
+  font-size: 0.85rem;
+  color: var(--muted-2);
+  white-space: nowrap;
+}
+.flow-step.done .flow-dot { background: var(--salvia); }
+.flow-step.done .flow-label { color: var(--muted); }
+.flow-step.current .flow-dot {
+  background: var(--lodbla);
+  box-shadow: 0 0 0 4px rgba(28,44,58,0.12);
+}
+.flow-step.current .flow-label { color: var(--lodbla); font-weight: 600; }
+.flow-line {
+  flex: 1;
+  min-width: 16px;
+  height: 1px;
+  background: var(--linjegra);
+}
+
+/* Formalia-checklista */
+.slutfor-checklist { padding: 8px 0; }
+.check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #F0EBDF;
+}
+.check-item:last-child { border-bottom: none; }
+.check-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.check-item[data-state="pass"] .check-mark { background: #DCE6D4; color: var(--salvia); }
+.check-item[data-state="fail"] .check-mark { background: #F0DDD3; color: var(--tegel); }
+.check-item[data-state="warn"] .check-mark { background: #FBF1D8; color: #8A6A0F; }
+.check-body { flex: 1; min-width: 0; }
+.check-label { font-weight: 500; color: var(--lodbla); font-size: 0.94rem; }
+.check-optional { font-weight: 400; color: var(--muted-2); font-size: 0.82rem; }
+.check-detail { font-size: 0.86rem; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.check-fix {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--tegel);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.slutfor-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--linjegra);
+  flex-wrap: wrap;
+}
+.slutfor-outcome-label { font-weight: 500; color: var(--lodbla); }
+.slutfor-done {
+  font-size: 0.95rem;
+  color: var(--jarn);
+}

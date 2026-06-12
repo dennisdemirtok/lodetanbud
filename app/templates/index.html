@@ -460,6 +460,7 @@
                 </div>
                 <div class="kalkylator-head-actions">
                   <button type="button" class="btn btn-ghost btn-sm" id="kalkylatorKravBtn">Kravmatris</button>
+                  <button type="button" class="btn btn-primary btn-sm" id="kalkylatorSlutforBtn">Slutför anbud →</button>
                   <button type="button" class="btn btn-ghost btn-sm" id="kalkylatorAgentBtn">↗ Öppna i Agent</button>
                 </div>
               </div>
@@ -667,6 +668,26 @@
                 </div>
                 <div id="kravList" class="krav-list"></div>
               </div>
+            </div>
+          </section>
+
+          <!-- =================== SLUTFÖR ANBUD (AP5) =================== -->
+          <section class="view view-slutfor" data-view="slutfor" hidden>
+            <div class="page-head">
+              <p class="eyebrow">Slutför anbud</p>
+              <h1 id="slutforTitle">—</h1>
+              <p class="lede" id="slutforMeta">—</p>
+            </div>
+
+            <div class="slutfor-flow" id="slutforFlow"></div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <h2>Formaliakontroll</h2>
+                <span class="muted small" id="slutforGateMeta"></span>
+              </div>
+              <div id="slutforChecklist" class="slutfor-checklist"></div>
+              <div class="slutfor-actions" id="slutforActions"></div>
             </div>
           </section>
 
@@ -1095,6 +1116,33 @@
           <button class="btn btn-ghost btn-sm" id="draftModalRegenerate">Generera om</button>
           <button class="btn btn-ghost btn-sm" id="draftModalPdf">Hämta PDF</button>
           <button class="btn btn-primary btn-sm" id="draftModalSave">Spara</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= AFB-SVARS-MODAL (AP5) ======================= -->
+  <div class="modal-overlay" id="answerModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="answerModalTitle">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow" id="answerModalCode">AFB-svar</p>
+          <h2 id="answerModalTitle">Svar på krav</h2>
+        </div>
+        <button class="modal-close" id="answerModalClose" aria-label="Stäng">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="answer-modal-quote" id="answerModalQuote"></p>
+        <div class="answer-modal-missing" id="answerModalMissing" hidden></div>
+        <textarea class="modal-textarea" id="answerModalText" spellcheck="false" placeholder="Klicka 'Generera' för ett utkast, eller skriv svaret direkt…"></textarea>
+        <p class="answer-modal-sources muted small" id="answerModalSources"></p>
+      </div>
+      <div class="modal-foot">
+        <span class="muted small" id="answerModalStatus"></span>
+        <div class="modal-foot-actions">
+          <button class="btn btn-ghost btn-sm" id="answerModalGenerate">✦ Generera</button>
+          <button class="btn btn-primary btn-sm" id="answerModalSave">Spara svar</button>
+          <button class="btn btn-primary btn-sm" id="answerModalAccept">Spara + markera besvarad</button>
         </div>
       </div>
     </div>

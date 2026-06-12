@@ -22,11 +22,13 @@ from sqlalchemy import select as sa_select
 from app import __version__
 from app import afb_templates as afb
 from app import ama_catalog
+from app import answer_generator
 from app import case_archive
 from app import chat as lodet_chat
 from app import company_settings
 from app import db as lodet_db
 from app import db_migrate
+from app import formalia
 from app import jobs as jobq
 from app import pdf_renderer
 from app import price_engine
@@ -780,7 +782,16 @@ async def api_case_krav(case_id: str) -> JSONResponse:
 
     af_doc = next((d for d in docs if (d.storage_path or "").lower().endswith(".pdf")), None)
 
-    reqs = [_requirement_dict(r) for r in rows]
+    # Berika med AFB-svarsstatus ur drafts (AP5)
+    full_case = await case_archive.get_case(case_id)
+    drafts = (full_case or {}).get("drafts") or {}
+    reqs = []
+    for r in rows:
+        d = _requirement_dict(r)
+        ans = drafts.get(f"req:{r.id}")
+        d["has_answer"] = bool(ans)
+        d["answer_gaps"] = bool(ans and answer_generator.SAKNAS_RE.search(ans.get("text") or ""))
+        reqs.append(d)
     skall = [r for r in reqs if r["kind"] == "skall"]
     answered = [r for r in reqs if r["status"] in ("answered", "na")]
     counts = {
@@ -813,13 +824,14 @@ async def api_case_krav(case_id: str) -> JSONResponse:
 async def api_case_krav_update(case_id: str, req_id: str, payload: dict = Body(...)) -> JSONResponse:
     """Uppdatera status på ett krav (unanswered|answered|na)."""
     status = payload.get("status")
-    if status not in ("unanswered", "answered", "na"):
-        raise HTTPException(status_code=400, detail="status måste vara unanswered, answered eller na")
+    if status not in ("unanswered", "drafted", "answered", "na"):
+        raise HTTPException(status_code=400, detail="status måste vara unanswered, drafted, answered eller na")
 
     async with lodet_db.SessionLocal() as session:
         row = await session.get(lodet_db.Requirement, req_id)
         if row is None or row.case_id != case_id:
             raise HTTPException(status_code=404, detail="Kravet hittades inte")
+        prev_status = row.status
         row.status = status
         row.reviewed_by_user = True
         await lodet_db.log_event(session, case_id, "user_edit", {
@@ -827,7 +839,217 @@ async def api_case_krav_update(case_id: str, req_id: str, payload: dict = Body(.
         })
         await session.commit()
         await session.refresh(row)
-        return JSONResponse({"requirement": _requirement_dict(row)})
+        req_dict = _requirement_dict(row)
+        answer_draft_id = row.answer_draft_id
+
+    # När ett krav markeras besvarat och har ett genererat svar utan luckor:
+    # skriv svaret till svarsbiblioteket (AP5-flywheel).
+    if status == "answered" and prev_status != "answered" and answer_draft_id:
+        draft = await case_archive.get_draft(case_id, answer_draft_id)
+        if draft and draft.get("text"):
+            await answer_generator.save_to_library(req_dict, draft["text"], source_case_id=case_id)
+
+    return JSONResponse({"requirement": req_dict})
+
+
+# --- AFB-svarsgenerering kravvis (AP5) --------------------------------------
+
+@app.post("/api/cases/{case_id}/krav/{req_id}/answer")
+async def api_generate_answer(case_id: str, req_id: str) -> JSONResponse:
+    """Generera AFB-fritextsvar för ett krav. Sparas som draft (key='req:<id>'),
+    kravet får answer_draft_id + status='drafted'."""
+    case = await case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    async with lodet_db.SessionLocal() as session:
+        row = await session.get(lodet_db.Requirement, req_id)
+        if row is None or row.case_id != case_id:
+            raise HTTPException(status_code=404, detail="Kravet hittades inte")
+        requirement = _requirement_dict(row)
+
+    result = await answer_generator.generate_answer(case, requirement)
+    draft_key = f"req:{req_id}"
+    await case_archive.update_draft(case_id, draft_key, result["answer"], edited=False)
+
+    async with lodet_db.SessionLocal() as session:
+        row = await session.get(lodet_db.Requirement, req_id)
+        if row is not None:
+            row.answer_draft_id = draft_key
+            if row.status == "unanswered":
+                row.status = "drafted"
+            await session.commit()
+
+    return JSONResponse({
+        "case_id": case_id,
+        "req_id": req_id,
+        "answer": result["answer"],
+        "missing": result["missing"],
+        "sources_used": result["sources_used"],
+        "library_used": result["library_used"],
+        "draft_key": draft_key,
+    })
+
+
+@app.put("/api/cases/{case_id}/krav/{req_id}/answer")
+async def api_save_answer(case_id: str, req_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Spara redigerat AFB-svar."""
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text saknas")
+
+    async with lodet_db.SessionLocal() as session:
+        row = await session.get(lodet_db.Requirement, req_id)
+        if row is None or row.case_id != case_id:
+            raise HTTPException(status_code=404, detail="Kravet hittades inte")
+
+    draft_key = f"req:{req_id}"
+    await case_archive.update_draft(case_id, draft_key, text, edited=True)
+
+    async with lodet_db.SessionLocal() as session:
+        row = await session.get(lodet_db.Requirement, req_id)
+        if row is not None and not row.answer_draft_id:
+            row.answer_draft_id = draft_key
+            await session.commit()
+
+    has_gaps = bool(answer_generator.SAKNAS_RE.search(text))
+    return JSONResponse({"case_id": case_id, "req_id": req_id, "has_gaps": has_gaps})
+
+
+@app.get("/api/cases/{case_id}/krav/{req_id}/answer")
+async def api_get_answer(case_id: str, req_id: str) -> JSONResponse:
+    """Hämta sparat AFB-svar för ett krav."""
+    draft = await case_archive.get_draft(case_id, f"req:{req_id}")
+    if draft is None:
+        return JSONResponse({"text": None})
+    return JSONResponse({
+        "text": draft.get("text"),
+        "edited_at": draft.get("edited_at"),
+        "has_gaps": bool(answer_generator.SAKNAS_RE.search(draft.get("text") or "")),
+    })
+
+
+# --- Formaliagrind + state-flöde (AP5) --------------------------------------
+
+@app.get("/api/cases/{case_id}/formalia")
+async def api_formalia(case_id: str) -> JSONResponse:
+    """Kör formaliagrindens checklista (deterministisk)."""
+    case = await case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+    result = await formalia.run_gate(case)
+    result["case_id"] = case_id
+    result["state"] = case.get("state")
+    return JSONResponse(result)
+
+
+@app.post("/api/cases/{case_id}/advance")
+async def api_advance(case_id: str, payload: dict = Body(default={})) -> JSONResponse:
+    """Driv anbudet framåt i statemaskinen för stegen som inte har egen grind:
+    CALCULATING→DRAFTING→FORMALIA_CHECK. READY nås bara via /finalize."""
+    target = payload.get("to")
+    allowed_targets = {case_states.DRAFTING, case_states.FORMALIA_CHECK, case_states.CALCULATING}
+    if target not in allowed_targets:
+        raise HTTPException(status_code=400, detail=f"to måste vara en av {sorted(allowed_targets)}")
+
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+        try:
+            await case_states.transition(session, case, target)
+        except case_states.IllegalTransition as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        await session.commit()
+        return JSONResponse({"state": case.state, "state_label": case_states.LABELS.get(case.state)})
+
+
+@app.post("/api/cases/{case_id}/finalize")
+async def api_finalize(case_id: str) -> JSONResponse:
+    """FORMALIA_CHECK → READY — ENDAST när grinden passerar (409 annars).
+    Detta är grindfunktionen: inget anbud blir klart med obesvarade skall-krav."""
+    case = await case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    gate = await formalia.run_gate(case)
+    if not gate["passed"]:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "passed": False,
+                "blocking_count": gate["blocking_count"],
+                "items": gate["items"],
+                "detail": f"{gate['blocking_count']} obligatoriska punkter blockerar.",
+            },
+        )
+
+    async with lodet_db.SessionLocal() as session:
+        row = await session.get(lodet_db.Case, case_id)
+        if row.state != case_states.FORMALIA_CHECK:
+            # tillåt finalize direkt från DRAFTING genom mellanläge
+            if row.state == case_states.DRAFTING:
+                await case_states.transition(session, row, case_states.FORMALIA_CHECK)
+            else:
+                raise HTTPException(status_code=409, detail=f"Fel state för finalize: {row.state}")
+        await case_states.transition(session, row, case_states.READY)
+        await lodet_db.log_event(session, case_id, "formalia_passed", {
+            "checks": len(gate["items"]),
+        })
+        await session.commit()
+        return JSONResponse({"passed": True, "state": row.state, "state_label": case_states.LABELS.get(row.state)})
+
+
+@app.post("/api/cases/{case_id}/submit")
+async def api_submit(case_id: str) -> JSONResponse:
+    """READY → SUBMITTED. Prissatta rader blir prisdata (own_bid, won=null)."""
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+        try:
+            await case_states.transition(session, case, case_states.SUBMITTED)
+        except case_states.IllegalTransition as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        await session.commit()
+
+    try:
+        await price_engine.refresh_observations_for_case(case_id)
+    except Exception:
+        pass
+    return JSONResponse({"state": case_states.SUBMITTED, "state_label": case_states.LABELS.get(case_states.SUBMITTED)})
+
+
+@app.post("/api/cases/{case_id}/outcome")
+async def api_outcome(case_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """SUBMITTED → AWARDED/LOST. Fyller won-flaggan på prisobservationerna
+    (stänger flywheeln: utfall tillbaka in i datan, AP4/AP6)."""
+    result = payload.get("result")
+    if result not in ("won", "lost"):
+        raise HTTPException(status_code=400, detail="result måste vara 'won' eller 'lost'")
+    target = case_states.AWARDED if result == "won" else case_states.LOST
+
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+        try:
+            await case_states.transition(session, case, target)
+        except case_states.IllegalTransition as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        # Fyll won-flaggan på casens prisobservationer
+        obs = (await session.execute(
+            sa_select(lodet_db.PriceObservation).where(lodet_db.PriceObservation.case_id == case_id)
+        )).scalars().all()
+        for o in obs:
+            o.won = (result == "won")
+        await session.commit()
+
+    return JSONResponse({
+        "state": target,
+        "state_label": case_states.LABELS.get(target),
+        "observations_updated": len(obs),
+    })
 
 
 @app.get("/api/cases/{case_id}/file/{doc_id}")

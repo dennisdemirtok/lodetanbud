@@ -107,6 +107,25 @@ function navigate() {
     return;
   }
 
+  // Dynamisk route: #/slutfor/{case_id} — formaliagrind + inlämning (AP5)
+  const slutMatch = hash.match(/^#\/slutfor\/(.+)$/);
+  if (slutMatch) {
+    const caseId = decodeURIComponent(slutMatch[1]);
+    document.querySelectorAll('.view').forEach((v) => v.hidden = true);
+    const viewEl = document.querySelector('[data-view="slutfor"]');
+    if (viewEl) viewEl.hidden = false;
+    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    document.querySelector('.tab[data-tab="kalkylator"]')?.classList.add('active');
+    document.querySelectorAll('.sidebar-section').forEach((s) => s.hidden = true);
+    const sb = document.querySelector('.sidebar-section[data-sidebar="kalkylator"]');
+    if (sb) sb.hidden = false;
+    document.querySelectorAll('.sidebar-link').forEach((el) => el.classList.remove('active'));
+    document.querySelectorAll('.sidebar.open').forEach((s) => s.classList.remove('open'));
+    window.scrollTo({ top: 0 });
+    loadSlutfor(caseId);
+    return;
+  }
+
   const route = ROUTES[hash] || ROUTES['#/start'];
 
   // Visa rätt view
@@ -150,6 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindChat();
   bindDraftModal();
   bindCalcModal();
+  bindAnswerModal();
   if (!location.hash) location.hash = '#/start';
   navigate();
   renderRecentChats();
@@ -770,6 +790,26 @@ async function renderCompanyForm() {
       <div class="form-row">
         <label>Standardbeställare (optional)<input type="text" name="default_customer" placeholder="Trafikverket" /></label>
       </div>
+
+      <div class="company-form-section">Företagsfakta för AFB-svar</div>
+      <p class="company-form-hint">Dessa uppgifter är det enda agenten får citera när den genererar svar på anbudskrav. Tomma fält blir <code>[SAKNAS]</code>-markörer i utkasten — aldrig påhittade siffror.</p>
+      <div class="form-row">
+        <label>Årsomsättning (Mkr)<input type="text" name="omsattning_msek" placeholder="180" /></label>
+        <label>Antal anställda<input type="text" name="antal_anstallda" placeholder="45" /></label>
+      </div>
+      <div class="form-row">
+        <label>Certifikat<input type="text" name="certifikat" placeholder="ISO 9001, ISO 14001, BF9K" /></label>
+      </div>
+      <div class="form-row">
+        <label>Referensprojekt<textarea name="referensprojekt" rows="2" placeholder="Vägbelysning Rv84 (Trafikverket, 2023, 4,2 Mkr)…"></textarea></label>
+      </div>
+      <div class="form-row">
+        <label>Nyckelpersoner<textarea name="nyckelpersoner" rows="2" placeholder="Platschef Lars Olsson, 18 års erfarenhet av väg/anläggning…"></textarea></label>
+      </div>
+      <div class="form-row">
+        <label>UE-policy<textarea name="ue_policy" rows="2" placeholder="Hur företaget arbetar med underentreprenörer…"></textarea></label>
+      </div>
+
       <div class="form-actions">
         <span class="muted small" id="companyFormStatus"></span>
         <button type="submit" class="btn btn-primary">Spara</button>
@@ -2326,6 +2366,8 @@ async function renderKalkylatorForCase(caseId) {
     document.getElementById('kalkylatorAgentBtn').onclick = () => { location.hash = '#/start'; };
     const kravBtn = document.getElementById('kalkylatorKravBtn');
     if (kravBtn) kravBtn.onclick = () => { location.hash = `#/krav/${encodeURIComponent(caseId)}`; };
+    const slutBtn = document.getElementById('kalkylatorSlutforBtn');
+    if (slutBtn) slutBtn.onclick = () => { location.hash = `#/slutfor/${encodeURIComponent(caseId)}`; };
 
     // Mängdförteckning-pane
     if (c.parsed_mf) {
@@ -4018,10 +4060,18 @@ function renderKravRow(r) {
           ${r.deadline ? `<span class="krav-deadline">⏱ ${escapeHtml(r.deadline)}</span>` : ''}
         </div>
         <p class="krav-quote">”${escapeHtml(r.text)}”</p>
+        ${r.response_format === 'fritext' ? `
+        <div class="krav-answer-row">
+          <button type="button" class="draft-action" data-action="answer" data-req-id="${escapeAttr(r.id)}">
+            ${r.has_answer ? '✎ Redigera svar' : '✦ Generera svar'}
+          </button>
+          ${r.has_answer ? `<span class="krav-answer-flag${r.answer_gaps ? ' gaps' : ' ok'}">${r.answer_gaps ? '⚠ har [SAKNAS]-luckor' : '✓ svar klart'}</span>` : ''}
+        </div>` : ''}
       </div>
       <div class="krav-statuscell">
         <select class="krav-status-select" data-req-id="${escapeAttr(r.id)}">
           <option value="unanswered" ${r.status === 'unanswered' ? 'selected' : ''}>Obesvarad</option>
+          <option value="drafted" ${r.status === 'drafted' ? 'selected' : ''}>Utkast</option>
           <option value="answered" ${r.status === 'answered' ? 'selected' : ''}>Besvarad</option>
           <option value="na" ${r.status === 'na' ? 'selected' : ''}>Ej tillämplig</option>
         </select>
@@ -4033,11 +4083,18 @@ function renderKravRow(r) {
 function bindKravRows(el) {
   el.querySelectorAll('.krav-row').forEach((rowEl) => {
     rowEl.addEventListener('click', (e) => {
-      if (e.target.closest('select')) return;
+      if (e.target.closest('select') || e.target.closest('button')) return;
       el.querySelectorAll('.krav-row.selected').forEach((x) => x.classList.remove('selected'));
       rowEl.classList.add('selected');
       const r = kravState.requirements.find((x) => x.id === rowEl.dataset.reqId);
       if (r?.source?.page && kravState.pdf) kravShowPage(r.source.page);
+    });
+  });
+
+  el.querySelectorAll('[data-action="answer"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openAnswerModal(btn.dataset.reqId);
     });
   });
 
@@ -4068,6 +4125,286 @@ function bindKravRows(el) {
       }
     });
   });
+}
+
+// ---------- SLUTFÖR ANBUD (AP5) -----------------------------------------
+
+const _FLOW_STEPS = [
+  { state: 'CALCULATING', label: 'Kalkyl' },
+  { state: 'DRAFTING', label: 'Utkast' },
+  { state: 'FORMALIA_CHECK', label: 'Formaliakontroll' },
+  { state: 'READY', label: 'Klart' },
+  { state: 'SUBMITTED', label: 'Inlämnat' },
+  { state: 'AWARDED', label: 'Utfall' },
+];
+const _FLOW_ORDER = ['CALCULATING', 'DRAFTING', 'FORMALIA_CHECK', 'READY', 'SUBMITTED', 'AWARDED', 'LOST'];
+
+let _slutforCase = null;
+
+async function loadSlutfor(caseId) {
+  document.getElementById('slutforTitle').textContent = 'Laddar …';
+  document.getElementById('slutforFlow').innerHTML = '';
+  document.getElementById('slutforChecklist').innerHTML = '';
+  document.getElementById('slutforActions').innerHTML = '';
+  document.getElementById('slutforGateMeta').textContent = '';
+
+  try {
+    const cres = await fetch(`/api/cases/${encodeURIComponent(caseId)}`);
+    if (!cres.ok) throw new Error('Anbudet hittades inte');
+    const c = await cres.json();
+    _slutforCase = c;
+
+    document.getElementById('slutforTitle').textContent = c.project_name || caseId;
+    const metaParts = [];
+    if (c.document_number) metaParts.push(c.document_number);
+    metaParts.push(`status: ${stateLabelOf(c.state)}`);
+    document.getElementById('slutforMeta').textContent = metaParts.join(' · ');
+
+    renderSlutforFlow(c.state);
+
+    const gres = await fetch(`/api/cases/${encodeURIComponent(caseId)}/formalia`);
+    const gate = await gres.json();
+    renderSlutforChecklist(gate);
+    renderSlutforActions(caseId, c.state, gate);
+  } catch (e) {
+    document.getElementById('slutforTitle').textContent = 'Fel';
+    document.getElementById('slutforMeta').textContent = e.message;
+  }
+}
+
+function stateLabelOf(state) {
+  const m = { CALCULATING:'Kalkyl', DRAFTING:'Utkast', FORMALIA_CHECK:'Formaliakontroll',
+    READY:'Klart att lämna', SUBMITTED:'Inlämnat', AWARDED:'Vunnet', LOST:'Förlorat',
+    NEEDS_REVIEW:'Behöver granskning', INTAKE:'Mottaget', EXTRACTING:'Analyserar' };
+  return m[state] || state;
+}
+
+function renderSlutforFlow(state) {
+  const curIdx = _FLOW_ORDER.indexOf(state === 'LOST' ? 'AWARDED' : state);
+  const el = document.getElementById('slutforFlow');
+  el.innerHTML = _FLOW_STEPS.map((s) => {
+    const idx = _FLOW_ORDER.indexOf(s.state);
+    let cls = 'flow-step';
+    if (idx < curIdx) cls += ' done';
+    else if (idx === curIdx) cls += ' current';
+    let label = s.label;
+    if (s.state === 'AWARDED' && state === 'LOST') label = 'Förlorat';
+    if (s.state === 'AWARDED' && state === 'AWARDED') label = 'Vunnet';
+    return `<div class="${cls}"><span class="flow-dot"></span><span class="flow-label">${escapeHtml(label)}</span></div>`;
+  }).join('<span class="flow-line"></span>');
+}
+
+function renderSlutforChecklist(gate) {
+  const el = document.getElementById('slutforChecklist');
+  document.getElementById('slutforGateMeta').textContent = gate.passed
+    ? '✓ alla obligatoriska punkter passerar'
+    : `${gate.blocking_count} blockerande punkt${gate.blocking_count === 1 ? '' : 'er'}`;
+
+  el.innerHTML = (gate.items || []).map((it) => {
+    const mark = it.passed ? '✓' : (it.required ? '✗' : '!');
+    const cls = it.passed ? 'pass' : (it.required ? 'fail' : 'warn');
+    return `
+      <div class="check-item" data-state="${cls}">
+        <span class="check-mark">${mark}</span>
+        <div class="check-body">
+          <div class="check-label">${escapeHtml(it.label)}${it.required ? '' : ' <span class="check-optional">(valfritt)</span>'}</div>
+          <div class="check-detail">${escapeHtml(it.detail)}</div>
+        </div>
+        ${(!it.passed && it.fix_route) ? `<a class="check-fix" href="${escapeAttr(it.fix_route)}">Åtgärda →</a>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderSlutforActions(caseId, state, gate) {
+  const el = document.getElementById('slutforActions');
+  let html = '';
+
+  if (state === 'CALCULATING' || state === 'NEEDS_REVIEW') {
+    html = `<button class="btn btn-primary" data-advance="DRAFTING">Gå vidare till utkast →</button>`;
+  } else if (state === 'DRAFTING' || state === 'FORMALIA_CHECK') {
+    const disabled = gate.passed ? '' : 'disabled';
+    html = `<button class="btn btn-primary" id="slutforFinalize" ${disabled}>Markera anbudet klart →</button>`;
+    if (!gate.passed) html += `<span class="muted small">Åtgärda de blockerande punkterna ovan först.</span>`;
+  } else if (state === 'READY') {
+    html = `<button class="btn btn-primary" id="slutforSubmit">Markera som inlämnat →</button>
+            <span class="muted small">När du lämnat in anbudet i upphandlingssystemet.</span>`;
+  } else if (state === 'SUBMITTED') {
+    html = `<span class="slutfor-outcome-label">Registrera utfall:</span>
+            <button class="btn btn-primary" data-outcome="won">Vunnet ✓</button>
+            <button class="btn btn-ghost" data-outcome="lost">Förlorat</button>`;
+  } else if (state === 'AWARDED' || state === 'LOST') {
+    html = `<div class="slutfor-done">Anbudet är avslutat: <strong>${escapeHtml(stateLabelOf(state))}</strong>. Priserna ligger i historiken för framtida förslag.</div>`;
+  }
+  el.innerHTML = html;
+
+  el.querySelector('[data-advance]')?.addEventListener('click', async (e) => {
+    await slutforAdvance(caseId, e.target.dataset.advance);
+  });
+  document.getElementById('slutforFinalize')?.addEventListener('click', () => slutforFinalize(caseId));
+  document.getElementById('slutforSubmit')?.addEventListener('click', () => slutforSubmit(caseId));
+  el.querySelectorAll('[data-outcome]').forEach((b) =>
+    b.addEventListener('click', () => slutforOutcome(caseId, b.dataset.outcome)));
+}
+
+async function slutforAdvance(caseId, to) {
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/advance`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }),
+    });
+    if (!res.ok) { const e = await safeJson(res); throw new Error(e?.detail || `HTTP ${res.status}`); }
+    await loadSlutfor(caseId);
+  } catch (e) { alert(e.message); }
+}
+
+async function slutforFinalize(caseId) {
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/finalize`, { method: 'POST' });
+    const d = await safeJson(res);
+    if (res.status === 409) {
+      alert(`Kan inte markeras klart: ${d.blocking_count} blockerande punkter kvarstår.`);
+      await loadSlutfor(caseId);
+      return;
+    }
+    if (!res.ok) throw new Error(d?.detail || `HTTP ${res.status}`);
+    await loadSlutfor(caseId);
+  } catch (e) { alert(e.message); }
+}
+
+async function slutforSubmit(caseId) {
+  if (!confirm('Markera anbudet som inlämnat? Priserna sparas då i historiken.')) return;
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/submit`, { method: 'POST' });
+    if (!res.ok) { const e = await safeJson(res); throw new Error(e?.detail || `HTTP ${res.status}`); }
+    await loadSlutfor(caseId);
+  } catch (e) { alert(e.message); }
+}
+
+async function slutforOutcome(caseId, result) {
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/outcome`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ result }),
+    });
+    const d = await safeJson(res);
+    if (!res.ok) throw new Error(d?.detail || `HTTP ${res.status}`);
+    await loadSlutfor(caseId);
+  } catch (e) { alert(e.message); }
+}
+
+// ---- AFB-svarsmodal (AP5) ----------------------------------------------
+
+let _answerReqId = null;
+
+function highlightSaknas(text) {
+  return escapeHtml(text).replace(/\[SAKNAS:[^\]]*\]/g,
+    (m) => `<mark class="saknas-mark">${m}</mark>`);
+}
+
+async function openAnswerModal(reqId) {
+  _answerReqId = reqId;
+  const req = kravState.requirements.find((x) => x.id === reqId);
+  const modal = document.getElementById('answerModal');
+  document.getElementById('answerModalCode').textContent = req?.af_code ? `AFB-svar · ${req.af_code}` : 'AFB-svar';
+  document.getElementById('answerModalQuote').textContent = req ? `”${req.text}”` : '';
+  document.getElementById('answerModalText').value = '';
+  document.getElementById('answerModalMissing').hidden = true;
+  document.getElementById('answerModalSources').textContent = '';
+  document.getElementById('answerModalStatus').textContent = 'Hämtar…';
+  modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(kravState.caseId)}/krav/${encodeURIComponent(reqId)}/answer`);
+    const d = await res.json();
+    document.getElementById('answerModalText').value = d.text || '';
+    document.getElementById('answerModalStatus').textContent = d.text ? '' : 'Inget svar än — klicka Generera.';
+    updateAnswerGapHint(d.text || '');
+  } catch (e) {
+    document.getElementById('answerModalStatus').textContent = `Fel: ${e.message}`;
+  }
+}
+
+function updateAnswerGapHint(text) {
+  const gaps = (text.match(/\[SAKNAS:[^\]]*\]/g) || []);
+  const box = document.getElementById('answerModalMissing');
+  if (gaps.length) {
+    box.innerHTML = `<strong>${gaps.length} lucka${gaps.length === 1 ? '' : 'or'} att fylla i:</strong> `
+      + gaps.map((g) => escapeHtml(g)).join(' · ');
+    box.hidden = false;
+  } else {
+    box.hidden = true;
+  }
+}
+
+function closeAnswerModal() {
+  document.getElementById('answerModal').hidden = true;
+  document.body.style.overflow = '';
+  _answerReqId = null;
+}
+
+async function generateAnswer() {
+  if (!_answerReqId) return;
+  const status = document.getElementById('answerModalStatus');
+  status.textContent = 'Genererar med Claude…';
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(kravState.caseId)}/krav/${encodeURIComponent(_answerReqId)}/answer`, { method: 'POST' });
+    if (!res.ok) { const e = await safeJson(res); throw new Error(e?.detail || `HTTP ${res.status}`); }
+    const d = await res.json();
+    document.getElementById('answerModalText').value = d.answer || '';
+    updateAnswerGapHint(d.answer || '');
+    const src = (d.sources_used || []).length ? `Källor: ${d.sources_used.join(', ')}` : '';
+    const lib = d.library_used ? ` · ${d.library_used} tidigare svar använt` : '';
+    document.getElementById('answerModalSources').textContent = src + lib;
+    status.textContent = 'Genererat';
+  } catch (e) {
+    status.textContent = `Fel: ${e.message}`;
+  }
+}
+
+async function saveAnswer(markAnswered) {
+  if (!_answerReqId) return;
+  const text = document.getElementById('answerModalText').value;
+  const status = document.getElementById('answerModalStatus');
+  if (!text.trim()) { status.textContent = 'Tomt svar'; return; }
+  status.textContent = 'Sparar…';
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(kravState.caseId)}/krav/${encodeURIComponent(_answerReqId)}/answer`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    });
+    if (!res.ok) { const e = await safeJson(res); throw new Error(e?.detail || `HTTP ${res.status}`); }
+    const d = await res.json();
+
+    if (markAnswered) {
+      if (d.has_gaps && !confirm('Svaret har [SAKNAS]-luckor. Markera som besvarad ändå?')) {
+        status.textContent = 'Sparat (ej markerat besvarad)';
+        await loadKrav(kravState.caseId);
+        return;
+      }
+      await fetch(`/api/cases/${encodeURIComponent(kravState.caseId)}/krav/${encodeURIComponent(_answerReqId)}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'answered' }),
+      });
+    } else {
+      // Spara → status drafted
+      await fetch(`/api/cases/${encodeURIComponent(kravState.caseId)}/krav/${encodeURIComponent(_answerReqId)}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'drafted' }),
+      });
+    }
+    closeAnswerModal();
+    await loadKrav(kravState.caseId);
+  } catch (e) {
+    status.textContent = `Fel: ${e.message}`;
+  }
+}
+
+function bindAnswerModal() {
+  const modal = document.getElementById('answerModal');
+  if (!modal) return;
+  document.getElementById('answerModalClose').addEventListener('click', closeAnswerModal);
+  document.getElementById('answerModalGenerate').addEventListener('click', generateAnswer);
+  document.getElementById('answerModalSave').addEventListener('click', () => saveAnswer(false));
+  document.getElementById('answerModalAccept').addEventListener('click', () => saveAnswer(true));
+  document.getElementById('answerModalText').addEventListener('input', (e) => updateAnswerGapHint(e.target.value));
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeAnswerModal(); });
 }
 
 function bindKravOnce() {
