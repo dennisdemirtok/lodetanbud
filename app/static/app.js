@@ -537,19 +537,20 @@ function loadHistory() {
 }
 
 // Nästa steg per state — driver den guidade hubben
-function nextStepFor(state) {
+function nextStepFor(state, caseId) {
+  const id = encodeURIComponent(caseId || '');
   return ({
-    INTAKE:         { label: 'Analyserar…' },
-    EXTRACTING:     { label: 'Analyserar…' },
-    NEEDS_REVIEW:   { label: 'Granska extraktion' },
-    CALCULATING:    { label: 'Prissätt kalkyl' },
-    DRAFTING:       { label: 'Besvara krav' },
-    FORMALIA_CHECK: { label: 'Slutför' },
-    READY:          { label: 'Lämna in' },
-    SUBMITTED:      { label: 'Registrera utfall' },
-    AWARDED:        { label: 'Vunnet ✓' },
-    LOST:           { label: 'Förlorat' },
-  })[state] || { label: 'Öppna' };
+    INTAKE:         { label: 'Analyserar…',        route: `#/kalkylator/${id}` },
+    EXTRACTING:     { label: 'Analyserar…',        route: `#/kalkylator/${id}` },
+    NEEDS_REVIEW:   { label: 'Granska extraktion', route: `#/granska/${id}` },
+    CALCULATING:    { label: 'Prissätt kalkyl',    route: `#/kalkylator/${id}` },
+    DRAFTING:       { label: 'Besvara krav',       route: `#/krav/${id}` },
+    FORMALIA_CHECK: { label: 'Slutför',            route: `#/slutfor/${id}` },
+    READY:          { label: 'Lämna in',           route: `#/slutfor/${id}` },
+    SUBMITTED:      { label: 'Registrera utfall',  route: `#/slutfor/${id}` },
+    AWARDED:        { label: 'Vunnet ✓',           route: `#/slutfor/${id}` },
+    LOST:           { label: 'Förlorat',           route: `#/slutfor/${id}` },
+  })[state] || { label: 'Öppna', route: `#/anbud/edit/${id}` };
 }
 
 let _activeBidsPoll = null;
@@ -574,7 +575,7 @@ async function renderActiveBids() {
       const reqCount = c.required_count || 0;
       const draftCount = c.draft_count || 0;
       const progress = reqCount > 0 ? `${draftCount}/${reqCount} utkast` : `${c.file_count} filer`;
-      const next = nextStepFor(c.state);
+      const next = nextStepFor(c.state, c.id);
       const busy = c.state === 'INTAKE' || c.state === 'EXTRACTING';
       return `
         <div class="bid-row${busy ? ' busy' : ''}" data-case-id="${escapeHtml(c.id)}">
@@ -589,9 +590,10 @@ async function renderActiveBids() {
       `;
     }).join('');
 
+    const routeById = Object.fromEntries(cases.map((c) => [c.id, nextStepFor(c.state, c.id).route]));
     el.querySelectorAll('.bid-row').forEach((row) => {
       row.addEventListener('click', () => {
-        location.hash = `#/anbud/edit/${encodeURIComponent(row.dataset.caseId)}`;
+        location.hash = routeById[row.dataset.caseId] || `#/anbud/edit/${encodeURIComponent(row.dataset.caseId)}`;
       });
     });
 
