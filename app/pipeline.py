@@ -242,6 +242,13 @@ async def run_parse_package(job) -> dict:
         except Exception:
             pass
 
+    # Redan prissatta MF:er (t.ex. demo, à-prislistor) blir prisdata direkt
+    try:
+        from app import price_engine
+        await price_engine.refresh_observations_for_case(case_id)
+    except Exception:
+        pass
+
     # EXTRACTING → NEEDS_REVIEW om någon rad ligger under tröskeln,
     # annars direkt till CALCULATING
     lines = (parsed_mf or {}).get("lines") or []

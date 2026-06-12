@@ -2580,6 +2580,29 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   white-space: nowrap;
 }
 
+/* Prisförslag ur historiken (AP4) */
+.mf-suggestion {
+  display: block;
+  margin: 2px 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border: 1px dashed var(--salvia);
+  border-radius: 10px;
+  background: #DCE6D4;
+  color: var(--salvia);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-style 0.12s;
+}
+.mf-suggestion:hover {
+  background: var(--salvia);
+  color: var(--krita);
+  border-style: solid;
+}
+.mf-suggestion-n { opacity: 0.75; }
+
 .mf-amount.changed { color: var(--tegel); }
 
 .mf-row-empty {

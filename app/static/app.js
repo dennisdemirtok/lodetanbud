@@ -1727,6 +1727,7 @@ let mfEditorState = {
   parsedMf: null,
   originalMf: null,
   dirty: false,
+  suggestions: {},   // lineIndex → prisförslag (AP4)
 };
 
 async function loadMfEditor(caseId) {
@@ -1753,6 +1754,7 @@ async function loadMfEditor(caseId) {
       parsedMf,
       originalMf: JSON.parse(JSON.stringify(parsedMf)),
       dirty: false,
+      suggestions: {},
     };
     renderMfEditorRows();
     bindMfEditorActions();
@@ -1806,6 +1808,110 @@ function renderMfEditorRows() {
       if (!Number.isNaN(idx)) openCalcModal(idx);
     });
   });
+  tbody.querySelectorAll('.mf-suggestion').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.suggestIndex, 10);
+      if (!Number.isNaN(idx)) applyMfSuggestion(idx);
+    });
+  });
+}
+
+// ---- Prisförslag (AP4) --------------------------------------------------
+
+const _SUGGEST_BASIS_LABELS = {
+  exact: 'exakt AMA-kod',
+  exact_old: 'exakt kod · äldre data',
+  parent: 'närliggande kod',
+  similar: 'liknande rad',
+};
+
+function mfSuggestionChip(i, hasPrice) {
+  const s = mfEditorState.suggestions?.[i];
+  if (!s || hasPrice) return '';
+  const titleLines = [
+    `Basis: ${_SUGGEST_BASIS_LABELS[s.basis] || s.basis}${(s.flags || []).length ? ' (' + s.flags.join(', ') + ')' : ''}`,
+    `Spann: ${fmtSEK.format(s.low)}–${fmtSEK.format(s.high)} kr · ${s.n} observation${s.n === 1 ? '' : 'er'}`,
+    ...(s.samples || []).map((x) => `${x.project || '—'} (${x.observed_at}): ${fmtSEK.format(x.unit_price)} kr`),
+    'Klicka för att använda förslaget',
+  ];
+  return `<button type="button" class="mf-suggestion" data-suggest-index="${i}" title="${escapeAttr(titleLines.join('\n'))}">≈ ${fmtSEK.format(s.unit_price)} <span class="mf-suggestion-n">(${s.n})</span></button>`;
+}
+
+async function fetchPriceSuggestions() {
+  if (!mfEditorState.parsedMf) return;
+  const btn = document.getElementById('mfSuggestBtn');
+  const lines = mfEditorState.parsedMf.lines || [];
+  const targets = [];
+  lines.forEach((l, i) => {
+    if (!l.is_lump_sum && (l.unit_price == null || l.unit_price === '')) {
+      targets.push({ idx: i, ama_code: l.ama_code, description: l.description, unit: l.unit });
+    }
+  });
+  if (targets.length === 0) {
+    showAutosaveStatus('Alla rader har redan pris', '');
+    return;
+  }
+
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Hämtar förslag…';
+  try {
+    const res = await fetch('/api/price/suggest-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lines: targets.slice(0, 500),
+        exclude_case_id: mfEditorState.caseId,
+      }),
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      throw new Error(err?.detail || `HTTP ${res.status}`);
+    }
+    const d = await res.json();
+    mfEditorState.suggestions = {};
+    Object.entries(d.suggestions || {}).forEach(([k, v]) => {
+      mfEditorState.suggestions[parseInt(k, 10)] = v;
+    });
+    renderMfEditorRows();
+    const found = Object.keys(mfEditorState.suggestions).length;
+    showAutosaveStatus(
+      `Förslag för ${found} av ${targets.length} rader · ${d.observation_count} observationer i historiken`,
+      found ? 'saved' : '',
+    );
+  } catch (e) {
+    showAutosaveStatus(`Fel: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+function applyMfSuggestion(idx) {
+  const s = mfEditorState.suggestions?.[idx];
+  const line = mfEditorState.parsedMf?.lines?.[idx];
+  if (!s || !line) return;
+
+  line.unit_price = s.unit_price;
+  if (line.quantity != null) {
+    line.total_amount = round2(line.quantity * s.unit_price);
+  }
+  delete mfEditorState.suggestions[idx];
+  mfEditorState.dirty = true;
+  renderMfEditorRows();
+  updateMfTotals();
+  updateMfDirtyState();
+  scheduleAutosave();
+
+  if (mfEditorState.caseId) {
+    fetch(`/api/cases/${encodeURIComponent(mfEditorState.caseId)}/price-suggestion-applied`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ama_code: line.ama_code, suggested: s.unit_price, basis: s.basis, n: s.n,
+      }),
+    }).catch(() => {});
+  }
 }
 
 function renderMfRow(line, i) {
@@ -1828,7 +1934,7 @@ function renderMfRow(line, i) {
       <td class="col-num">
         ${isLump
           ? `<span class="mono">—</span>`
-          : `<input type="number" class="mf-cell-input mono" step="0.01" data-field="unit_price" data-line-index="${i}" value="${price}" />`}
+          : `<input type="number" class="mf-cell-input mono" step="0.01" data-field="unit_price" data-line-index="${i}" value="${price}" />${mfSuggestionChip(i, price !== '')}`}
       </td>
       <td class="col-num"><span class="mf-amount" data-amount-for="${i}">${amount == null ? '—' : `${fmtSEK.format(amount)} kr`}</span></td>
       <td class="col-action">
@@ -2015,6 +2121,11 @@ function bindMfEditorActions() {
   if (addBtn && !addBtn._bound) {
     addBtn.addEventListener('click', onMfAddRow);
     addBtn._bound = true;
+  }
+  const suggestBtn = document.getElementById('mfSuggestBtn');
+  if (suggestBtn && !suggestBtn._bound) {
+    suggestBtn.addEventListener('click', fetchPriceSuggestions);
+    suggestBtn._bound = true;
   }
 }
 

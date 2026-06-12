@@ -10,16 +10,113 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 from app import states
 from app.case_archive import _doc_dict_to_row, _line_dict_to_row
-from app.db import Case, SessionLocal, log_event
+from app.db import Case, SessionLocal, engine, log_event
 
 
 def _legacy_dirs() -> list[Path]:
     dirs = [Path(os.getenv("LODET_DATA_DIR", "/data")) / "cases", Path("/tmp/lodet/cases")]
     return [d for d in dirs if d.exists()]
+
+
+# ---- SQLite → Postgres ------------------------------------------------------
+# När DATABASE_URL pekas mot Postgres ligger AP1-erans data kvar i lodet.db
+# på volymen. Kopierar alla rader vars id inte redan finns. Idempotent.
+
+_SQLITE_JSON_COLS = {
+    "cases": {"meta"},
+    "documents": {"meta"},
+    "mf_lines": {"source", "original_values", "meta"},
+    "requirements": {"source"},
+    "jobs": {"payload", "result"},
+    "events": {"data"},
+}
+
+
+def _row_to_kwargs(table: str, row: sqlite3.Row) -> dict:
+    out = dict(row)
+    for col in _SQLITE_JSON_COLS.get(table, set()):
+        if col in out and isinstance(out[col], str):
+            try:
+                out[col] = json.loads(out[col])
+            except (json.JSONDecodeError, TypeError):
+                out[col] = None
+    return out
+
+
+async def migrate_sqlite_to_postgres() -> int:
+    """Engångsflytt av volymens SQLite-data in i Postgres. Returnerar antal
+    flyttade rader. No-op när engine inte är Postgres eller filen saknas."""
+    if engine.dialect.name != "postgresql":
+        return 0
+
+    sqlite_path = Path(os.getenv("LODET_DATA_DIR", "/data")) / "lodet.db"
+    if not sqlite_path.exists():
+        return 0
+
+    from app.db import Document, Event, Job, MfLine, Requirement
+
+    models = {
+        "cases": Case,
+        "documents": Document,
+        "mf_lines": MfLine,
+        "requirements": Requirement,
+        "jobs": Job,
+    }
+
+    con = sqlite3.connect(str(sqlite_path))
+    con.row_factory = sqlite3.Row
+    moved = 0
+
+    try:
+        existing_tables = {
+            r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+
+        # Id-bärande tabeller — hoppa över redan migrerade ids
+        for table, model in models.items():
+            if table not in existing_tables:
+                continue
+            for row in con.execute(f"SELECT * FROM {table}"):
+                kwargs = _row_to_kwargs(table, row)
+                async with SessionLocal() as session:
+                    if await session.get(model, kwargs["id"]) is not None:
+                        continue
+                    session.add(model(**kwargs))
+                    await session.commit()
+                    moved += 1
+
+        # Events: autoincrement-pk — lägg in utan id så PG-sekvensen styr.
+        # Dubbletter undviks med markörevent.
+        if "events" in existing_tables:
+            async with SessionLocal() as session:
+                from sqlalchemy import select as _select
+                marker = (await session.execute(
+                    _select(Event).where(Event.kind == "sqlite_events_migrated").limit(1)
+                )).scalar_one_or_none()
+            if marker is None:
+                for row in con.execute("SELECT * FROM events ORDER BY id"):
+                    kwargs = _row_to_kwargs("events", row)
+                    kwargs.pop("id", None)
+                    async with SessionLocal() as session:
+                        session.add(Event(**kwargs))
+                        await session.commit()
+                        moved += 1
+                async with SessionLocal() as session:
+                    await log_event(session, None, "sqlite_events_migrated", {"from": str(sqlite_path)})
+                    await session.commit()
+    finally:
+        con.close()
+
+    if moved:
+        async with SessionLocal() as session:
+            await log_event(session, None, "migrated_from_sqlite", {"rows": moved})
+            await session.commit()
+    return moved
 
 
 async def migrate_legacy_json() -> int:

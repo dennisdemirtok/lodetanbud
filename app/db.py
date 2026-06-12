@@ -20,7 +20,7 @@ import time
 import uuid
 from pathlib import Path
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -167,6 +167,37 @@ class Job(Base):
     finished_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
+class PriceObservation(Base):
+    """À-prishistorik (AP4) — varje granskat/prissatt case blir prisdata.
+
+    Embedding-kolumnen (plan §4.1, pgvector 1536) väntar på ett embedding-API
+    (Anthropic saknar eget; Voyage/OpenAI-nyckel behövs). Tills dess körs
+    likhetssteget i förslagskaskaden med pg_trgm (Postgres) respektive
+    difflib (SQLite) på description — deterministiskt och nyckelfritt.
+    meta.embedding är reserverad plats när nyckeln finns."""
+    __tablename__ = "price_observations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    case_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("cases.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    ama_code: Mapped[str] = mapped_column(String(32), index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit_price: Mapped[float] = mapped_column(Float)
+    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    observed_at: Mapped[str] = mapped_column(String(32))  # ISO-datum
+    source: Mapped[str] = mapped_column(String(16), default="own_bid")  # own_bid|awarded|ue_quote
+    won: Mapped[bool | None] = mapped_column(Boolean, nullable=True)    # fylls vid utfall (AP5)
+    project_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        Index("ix_price_obs_code_date", "ama_code", "observed_at"),
+    )
+
+
 class Event(Base):
     __tablename__ = "events"
 
@@ -180,8 +211,16 @@ class Event(Base):
 
 
 async def init_db() -> None:
-    """Skapa schema om det saknas (idempotent). Alembic införs när
-    Postgres-beslutet landat och schemat börjar ändras på riktigt."""
+    """Skapa schema om det saknas (idempotent). På Postgres aktiveras
+    pgvector (för embeddings när API-nyckel finns) och pg_trgm (driver
+    likhetssteget i prisförslagskaskaden, AP4)."""
+    if engine.dialect.name == "postgresql":
+        for ext in ("vector", "pg_trgm"):
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext}"))
+            except Exception as e:
+                print(f"[lodet] kunde inte aktivera extension {ext}: {e}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     FILES_DIR.mkdir(parents=True, exist_ok=True)

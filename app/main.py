@@ -28,6 +28,7 @@ from app import db as lodet_db
 from app import db_migrate
 from app import jobs as jobq
 from app import pdf_renderer
+from app import price_engine
 from app import requirement_extractor
 from app import resource_library
 from app import states as case_states
@@ -51,15 +52,21 @@ async def lifespan(_app: FastAPI):
     """Initiera DB, återställ avbrutna jobb, migrera legacy-JSON och
     starta jobb-workern (genomförandeplan AP1)."""
     await lodet_db.init_db()
-    reset = await jobq.reset_orphans()
-    if reset:
-        print(f"[lodet] {reset} avbrutna jobb återställda till kön")
+    try:
+        moved = await db_migrate.migrate_sqlite_to_postgres()
+        if moved:
+            print(f"[lodet] {moved} rader migrerade från volymens SQLite till Postgres")
+    except Exception as e:
+        print(f"[lodet] sqlite→postgres-migrering misslyckades: {e}")
     try:
         migrated = await db_migrate.migrate_legacy_json()
         if migrated:
             print(f"[lodet] {migrated} legacy-JSON-cases migrerade till databasen")
     except Exception as e:
         print(f"[lodet] legacy-migrering misslyckades: {e}")
+    reset = await jobq.reset_orphans()
+    if reset:
+        print(f"[lodet] {reset} avbrutna jobb återställda till kön")
     worker_task = asyncio.create_task(lodet_worker.worker_loop())
     yield
     worker_task.cancel()
@@ -587,7 +594,13 @@ async def api_review_line_update(case_id: str, line_id: str, payload: dict = Bod
         })
         await session.commit()
         await session.refresh(row)
-        return JSONResponse({"line": _review_line_dict(row), "total_amount_sek": total})
+
+    try:
+        await price_engine.refresh_observations_for_case(case_id)
+    except Exception:
+        pass
+
+    return JSONResponse({"line": _review_line_dict(row), "total_amount_sek": total})
 
 
 @app.post("/api/cases/{case_id}/review/approve")
@@ -648,6 +661,52 @@ async def api_review_complete(case_id: str) -> JSONResponse:
             "state": case.state,
             "state_label": case_states.LABELS.get(case.state, case.state),
         })
+
+
+# --- Prismotor (AP4) --------------------------------------------------------
+
+@app.post("/api/price/suggest-bulk")
+async def api_price_suggest_bulk(payload: dict = Body(...)) -> JSONResponse:
+    """À-prisförslag för en uppsättning rader. Stateless mot editorns data:
+    tar {lines: [{idx, ama_code, description, unit}], exclude_case_id}."""
+    lines = payload.get("lines") or []
+    exclude_case_id = payload.get("exclude_case_id")
+    if len(lines) > 500:
+        raise HTTPException(status_code=400, detail="max 500 rader per anrop")
+
+    suggestions: dict = {}
+    for line in lines:
+        idx = line.get("idx")
+        if idx is None:
+            continue
+        s = await price_engine.suggest(
+            ama_code=(line.get("ama_code") or "").strip() or None,
+            description=line.get("description"),
+            unit=(line.get("unit") or "").strip() or None,
+            exclude_case_id=exclude_case_id,
+        )
+        if s is not None:
+            suggestions[str(idx)] = s
+
+    return JSONResponse({
+        "suggestions": suggestions,
+        "observation_count": await price_engine.observation_count(),
+    })
+
+
+@app.post("/api/cases/{case_id}/price-suggestion-applied")
+async def api_price_suggestion_applied(case_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Logga att ett förslag applicerades — kvalitetsmått för motorn
+    (andel accepterade oförändrade följs i flywheel-rapporten, AP6)."""
+    async with lodet_db.SessionLocal() as session:
+        await lodet_db.log_event(session, case_id, "price_suggestion_applied", {
+            "ama_code": payload.get("ama_code"),
+            "suggested": payload.get("suggested"),
+            "basis": payload.get("basis"),
+            "n": payload.get("n"),
+        })
+        await session.commit()
+    return JSONResponse({"ok": True})
 
 
 # --- Kravmatris (AP3) -------------------------------------------------------
@@ -1077,6 +1136,12 @@ async def api_case_mf_update(case_id: str, payload: dict = Body(...)) -> JSONRes
 
     if not await case_archive.update_parsed_mf(case_id, parsed_mf):
         raise HTTPException(status_code=500, detail="Kunde inte spara MF")
+
+    # Prissatta rader blir prisdata (AP4) — idempotent omskrivning
+    try:
+        await price_engine.refresh_observations_for_case(case_id)
+    except Exception:
+        pass
 
     return JSONResponse({
         "case_id": case_id,
