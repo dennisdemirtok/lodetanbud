@@ -4031,3 +4031,110 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   vertical-align: middle;
   margin-right: 6px;
 }
+
+/* ========================================================================
+   Live arbetssteg (server-drivna) + agent-verktygssteg i chatten
+   ======================================================================== */
+
+.upload-progress-steps.live {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.upload-progress-steps.live li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 0;
+  color: var(--jarn);
+  animation: stepIn 0.25s ease both;
+}
+@keyframes stepIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.upload-progress-steps.live.compact { margin-top: 10px; gap: 7px; }
+
+.step-icon {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+.step-icon.done {
+  color: var(--skog, #3F6212);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.step-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.step-label { font-size: 0.92rem; font-weight: 500; }
+.upload-progress-steps.live li.done .step-label { color: var(--jarn); font-weight: 450; }
+.step-detail {
+  font-size: 0.82rem;
+  color: var(--muted-2, #8A8378);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Verktygssteg inne i agentens chattbubbla */
+.agent-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 10px;
+  padding: 10px 12px;
+  background: var(--bg-sidebar, #F4EFE7);
+  border-radius: 10px;
+}
+.agent-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  animation: stepIn 0.25s ease both;
+}
+.agent-step .btn-xs {
+  padding: 1px 8px;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  border-radius: 6px;
+}
+.agent-text p { margin: 0 0 8px; }
+.agent-text p:last-child { margin-bottom: 0; }
+
+/* Inline-svar på agentens frågor */
+.insights-section-hint {
+  font-size: 0.8rem;
+  color: var(--muted-2, #8A8378);
+  margin: -4px 0 10px;
+}
+.insight-answer-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.insight-answer-input {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--linjegra, #DDD6CA);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.88rem;
+  background: #fff;
+}
+.insight-answer-input:focus { outline: 2px solid var(--ockra); outline-offset: -1px; }
+.insight-answer {
+  margin: 8px 0 0;
+  font-size: 0.88rem;
+  color: var(--skog, #3F6212);
+  background: #F2F7EA;
+  border-radius: 8px;
+  padding: 7px 10px;
+}

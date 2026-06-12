@@ -112,8 +112,20 @@ async def find_library_matches(req_text: str, limit: int = 3) -> list[AnswerLibr
         return [r for _s, r in scored[:limit]]
 
 
-def _build_context(requirement: dict, company: dict, library: list[AnswerLibrary]) -> str:
+def _build_context(
+    requirement: dict,
+    company: dict,
+    library: list[AnswerLibrary],
+    case_answers: list[dict] | None = None,
+) -> str:
     parts = ["KRAVETS LYDELSE (ordagrant):", requirement.get("text") or "", ""]
+
+    if case_answers:
+        parts.append("PROJEKTSPECIFIKA FAKTA (användarens svar på agentens frågor om DETTA anbud):")
+        for qa in case_answers:
+            parts.append(f"  - Fråga: {qa.get('question')}")
+            parts.append(f"    Svar: {qa.get('answer')}")
+        parts.append("")
 
     parts.append("FÖRETAGSFAKTA (anbudsgivaren):")
     facts = {
@@ -156,6 +168,12 @@ async def generate_answer(case: dict, requirement: dict) -> dict:
     library = await find_library_matches(requirement.get("text") or "")
     case_id = case.get("id")
 
+    # Användarens svar på agentens frågor = projektspecifika fakta
+    case_answers = [
+        q for q in ((case.get("insights") or {}).get("questions") or [])
+        if isinstance(q, dict) and (q.get("answer") or "").strip()
+    ]
+
     if not llm.is_configured():
         # Deterministisk fallback: platsmall, allt okänt markeras
         title = requirement.get("af_code") or "Krav"
@@ -171,7 +189,7 @@ async def generate_answer(case: dict, requirement: dict) -> dict:
 
     parsed, _err = await llm.call_structured(
         system=_ANSWER_SYSTEM,
-        prompt=_build_context(requirement, company, library),
+        prompt=_build_context(requirement, company, library, case_answers=case_answers),
         schema=_ANSWER_SCHEMA,
         purpose="generate_afb_answer",
         case_id=case_id,

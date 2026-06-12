@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select as sa_select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app import __version__
 from app import afb_templates as afb
@@ -305,6 +306,7 @@ async def api_chat_status() -> JSONResponse:
 async def api_chat(payload: dict = Body(...)) -> StreamingResponse:
     messages = payload.get("messages") or []
     context = payload.get("context")
+    case_id = payload.get("case_id") or None
 
     if not isinstance(messages, list) or not messages:
         raise HTTPException(status_code=400, detail="Inga meddelanden mottagna")
@@ -320,7 +322,7 @@ async def api_chat(payload: dict = Body(...)) -> StreamingResponse:
         raise HTTPException(status_code=400, detail="Sista meddelandet måste vara från användaren")
 
     return StreamingResponse(
-        lodet_chat.stream_chat(cleaned, context=context),
+        lodet_chat.stream_chat(cleaned, context=context, case_id=case_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -368,18 +370,33 @@ async def _stage_package(source: str, source_name: str, pairs: list[tuple[str, b
     return case_id
 
 
+def _common_top_folder(paths: list[str]) -> str | None:
+    """Vanligaste toppmappen i relativa sökvägar — blir paketnamn."""
+    from collections import Counter
+    tops = Counter()
+    for p in paths:
+        parts = p.replace("\\", "/").strip("/").split("/")
+        if len(parts) > 1 and parts[0]:
+            tops[parts[0]] += 1
+    if not tops:
+        return None
+    top, n = tops.most_common(1)[0]
+    return top if n >= max(2, len(paths) // 2) else None
+
+
 @app.post("/api/package/analyze")
 async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONResponse:
     """
-    Tar emot ett helt anbudspaket — vanliga filer eller en eller flera ZIP-filer.
-    Om en ZIP innehåller flera toppmappar tolkas varje toppmapp som ett separat
-    anbudspaket. Returnerar case-ids direkt; analysen körs som jobb.
+    Tar emot ETT förfrågningsunderlag — mapp, lösa filer och/eller ZIP:ar.
+    Allt i en uppladdning blir ETT anbud (ett FFU = ett case). ZIP:ar
+    extraheras in i samma paket; mappstrukturen behålls som
+    klassificeringssignal i filnamnen.
     """
     if not files:
         raise HTTPException(status_code=400, detail="Inga filer mottagna")
 
-    plain_files: list[tuple[str, bytes]] = []
-    zip_groups: list[tuple[str, list[tuple[str, bytes]]]] = []
+    pairs: list[tuple[str, bytes]] = []
+    zip_names: list[str] = []
 
     for f in files:
         if not f.filename:
@@ -390,54 +407,66 @@ async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONRespon
                 extracted = zip_handler.extract_zip(data)
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-            grouped = zip_handler.group_by_folder(extracted)
-            zip_base = f.filename.rsplit(".", 1)[0]
-            for folder, fs in grouped.items():
-                # relative_path (med mappar) som filnamn — mappnamn bär
-                # klassificeringssignal (t.ex. "10. Mängdförteckning/")
-                pairs = [(x.relative_path, x.data) for x in fs]
-                source_name = f"{zip_base}/{folder}" if folder != "(rotmapp)" else zip_base
-                zip_groups.append((source_name, pairs))
+            zip_names.append(f.filename.rsplit(".", 1)[0].split("/")[-1])
+            # relative_path (med mappar) som filnamn — mappnamn bär
+            # klassificeringssignal (t.ex. "10. Mängdförteckning/")
+            pairs.extend((x.relative_path, x.data) for x in extracted)
         else:
-            plain_files.append((f.filename, data))
+            pairs.append((f.filename, data))
 
-    case_ids: list[str] = []
-
-    # Plain (lösa filer + ev. mapp via webkitdirectory) → ETT paket
-    if plain_files:
-        case_ids.append(await _stage_package(
-            source="folder" if len(plain_files) > 1 else "single",
-            source_name="uppladdat-paket",
-            pairs=plain_files,
-        ))
-
-    # Ett case per ZIP-mapp
-    for source_name, pairs in zip_groups:
-        case_ids.append(await _stage_package(source="zip", source_name=source_name, pairs=pairs))
-
-    if not case_ids:
+    if not pairs:
         raise HTTPException(status_code=400, detail="Inga giltiga filer i uppladdningen")
 
-    return JSONResponse({
-        "case_ids": case_ids,
-        "multi": len(case_ids) > 1,
-        "case_count": len(case_ids),
-    })
+    source_name = (
+        zip_names[0] if len(zip_names) == 1
+        else _common_top_folder([p for p, _ in pairs]) or "uppladdat-paket"
+    )
+
+    case_id = await _stage_package(
+        source="zip" if zip_names else ("folder" if len(pairs) > 1 else "single"),
+        source_name=source_name,
+        pairs=pairs,
+    )
+
+    return JSONResponse({"case_ids": [case_id], "multi": False, "case_count": 1})
 
 
 @app.get("/api/cases/{case_id}/status")
 async def api_case_status(case_id: str) -> JSONResponse:
-    """State + jobblista för polling under analys."""
+    """State + jobblista + live-progress för polling under analys."""
     async with lodet_db.SessionLocal() as session:
         case = await session.get(lodet_db.Case, case_id)
         if case is None:
             raise HTTPException(status_code=404, detail="Case hittades inte")
         jobs = await jobq.jobs_for_case(session, case_id)
+
+        # Arbetssteg (analysis_progress-events) — senaste status per steg,
+        # i den ordning stegen först dök upp
+        rows = (await session.execute(
+            sa_select(lodet_db.Event)
+            .where(lodet_db.Event.case_id == case_id,
+                   lodet_db.Event.kind == "analysis_progress")
+            .order_by(lodet_db.Event.id)
+        )).scalars().all()
+
+    steps: list[dict] = []
+    by_step: dict[str, dict] = {}
+    for ev in rows:
+        d = ev.data or {}
+        key = d.get("step") or "?"
+        if key in by_step:
+            by_step[key].update(d)
+        else:
+            entry = dict(d)
+            by_step[key] = entry
+            steps.append(entry)
+
     return JSONResponse({
         "case_id": case_id,
         "state": case.state,
         "state_label": case_states.LABELS.get(case.state, case.state),
         "jobs": jobs,
+        "progress": steps,
     })
 
 
@@ -927,6 +956,45 @@ async def api_get_answer(case_id: str, req_id: str) -> JSONResponse:
         "edited_at": draft.get("edited_at"),
         "has_gaps": bool(answer_generator.SAKNAS_RE.search(draft.get("text") or "")),
     })
+
+
+@app.post("/api/cases/{case_id}/insights/answer")
+async def api_answer_insight_question(case_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Spara användarens svar på en av agentens frågor. Svaret blir
+    projektspecifik fakta som svarsgeneratorn och chatt-agenten använder."""
+    index = payload.get("index")
+    answer = (payload.get("answer") or "").strip()
+    if not isinstance(index, int) or not answer:
+        raise HTTPException(status_code=400, detail="index (int) och answer krävs")
+
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+
+        meta = dict(case.meta or {})
+        insights = dict(meta.get("insights") or {})
+        questions = list(insights.get("questions") or [])
+        if not (0 <= index < len(questions)) or not isinstance(questions[index], dict):
+            raise HTTPException(status_code=404, detail="Frågan hittades inte")
+
+        questions[index] = {
+            **questions[index],
+            "answer": answer,
+            "answered_at": datetime.now(timezone.utc).isoformat(),
+        }
+        insights["questions"] = questions
+        meta["insights"] = insights
+        case.meta = meta
+        flag_modified(case, "meta")
+
+        await lodet_db.log_event(session, case_id, "user_edit", {
+            "what": "insight_question_answered",
+            "question": (questions[index].get("question") or "")[:200],
+        })
+        await session.commit()
+
+    return JSONResponse({"ok": True, "index": index})
 
 
 # --- Formaliagrind + state-flöde (AP5) --------------------------------------

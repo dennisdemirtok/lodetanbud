@@ -1,0 +1,25 @@
+# Genomförandeplan AP6.2 — ingen ändring mergas utan att den deterministiska
+# kärnan passerar: AF-split, citatverifiering, statemaskinens grindar,
+# etikettords-skydd, priskaskadens hierarki. De fulla golden-sviterna
+# (python -m evals.run --suite mf|krav|pris|afb) körs lokalt mot riktiga
+# förfrågningsunderlag som inte ligger i repot.
+name: evals
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  deterministic-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest tests/ -v
+      - name: Importera alla appmoduler (fångar syntax/import-fel)
+        run: python -c "from app import main, chat, agent_tools, pipeline, af_parser, formalia, answer_generator, price_engine, db_migrate"

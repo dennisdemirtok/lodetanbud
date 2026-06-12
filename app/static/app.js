@@ -1143,6 +1143,7 @@ async function handlePackageFiles(files) {
 
 // Mjuk landning när analysen drar ut på tiden — anbudet finns och blir klart.
 function showBackgroundNotice(caseId) {
+  _lastUploadCaseId = caseId;
   const chat = document.getElementById('chatMessages');
   if (chat) {
     const el = document.createElement('div');
@@ -1158,7 +1159,8 @@ function showBackgroundNotice(caseId) {
 }
 
 // Returnerar 'done' när alla klara, 'timeout' när taket nås, kastar vid jobbfel.
-async function pollCasesUntilDone(caseIds, { timeoutMs = 720000, intervalMs = 2500 } = {}) {
+// Pollar /status och renderar serverns arbetssteg live under tiden.
+async function pollCasesUntilDone(caseIds, { timeoutMs = 720000, intervalMs = 2000 } = {}) {
   const t0 = Date.now();
   while (true) {
     const statuses = await Promise.all(caseIds.map(async (id) => {
@@ -1168,6 +1170,8 @@ async function pollCasesUntilDone(caseIds, { timeoutMs = 720000, intervalMs = 25
       } catch { return null; }
     }));
     const valid = statuses.filter(Boolean);
+
+    if (valid[0]?.progress?.length) renderLiveProgress(valid[0].progress);
 
     const failedJob = valid.flatMap((s) => s.jobs || []).find((j) => j.status === 'failed');
     if (failedJob) {
@@ -1188,90 +1192,54 @@ function stateChip(c) {
   return ` <span class="state-chip" data-state="${escapeHtml(c.state)}">${escapeHtml(c.state_label || c.state)}</span>`;
 }
 
-// ---------- UPLOAD PROGRESS UI ----------------------------------------
+// ---------- UPLOAD PROGRESS UI (server-driven, Harvey-stil) ------------
+// Stegen kommer från analysis_progress-events via /status-pollingen —
+// riktiga arbetssteg med riktiga räknare, ingen simulering.
 
 let _uploadProgressTimer = null;
 let _uploadProgressStart = 0;
-let _uploadProgressEstimate = 60;
+// Total-steg för bar-procent: read, classify, krav, claude, save (+rescue ibland)
+const _EXPECTED_STEPS = 5;
 
 function showUploadProgress(files) {
   const el = document.getElementById('uploadProgress');
   if (!el) return;
   el.hidden = false;
-
-  const fileCount = files.length;
-  // Estimat: 5s baseline + 1.5s per fil + 25s för Claude-anrop
-  const estimate = Math.max(20, Math.round(5 + fileCount * 1.5 + 25));
-  _uploadProgressEstimate = estimate;
   _uploadProgressStart = Date.now();
 
-  document.getElementById('uploadProgressEstimate').textContent = `~${estimate} sek kvar`;
-
-  // Sex faser med ungefärliga andelar av totalen
-  const phases = [
-    { key: 'read',           text: 'Läser och packar upp filer…',                         fraction: 0.10 },
-    { key: 'classify',       text: `Klassificerar ${fileCount} dokument…`,                fraction: 0.25 },
-    { key: 'af',             text: 'Extraherar AF-text för krav-analys…',                 fraction: 0.10 },
-    { key: 'claude-req',     text: 'Frågar Claude vilka dokument anbudet ska innehålla…', fraction: 0.25 },
-    { key: 'claude-lessons', text: 'Extraherar lärdomar för kunskapsbasen…',              fraction: 0.25 },
-    { key: 'save',           text: 'Sparar i arkivet…',                                   fraction: 0.05 },
-  ];
-  // Cumulative seconds där varje fas börjar
-  let cum = 0;
-  phases.forEach((p) => { p.startSec = cum; cum += p.fraction * estimate; });
-
-  // Återställ alla steg-li:n
-  document.querySelectorAll('#uploadProgressSteps li').forEach((li) => {
-    li.classList.remove('active', 'done');
-  });
+  document.getElementById('uploadProgressSteps').innerHTML =
+    `<li class="active"><span class="step-icon"><span class="inline-spinner"></span></span>` +
+    `<span class="step-body"><span class="step-label">Laddar upp ${files.length} filer…</span></span></li>`;
+  document.getElementById('uploadProgressFill').style.width = '3%';
 
   if (_uploadProgressTimer) clearInterval(_uploadProgressTimer);
-
-  const phaseEl = document.getElementById('uploadProgressPhase');
-  const fillEl = document.getElementById('uploadProgressFill');
   const estEl = document.getElementById('uploadProgressEstimate');
+  _uploadProgressTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - _uploadProgressStart) / 1000);
+    estEl.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }, 1000);
+}
 
-  function tick() {
-    const elapsed = (Date.now() - _uploadProgressStart) / 1000;
+// Rendera serverns arbetssteg. steps = [{step,label,status,detail?}, …]
+function renderLiveProgress(steps) {
+  const ul = document.getElementById('uploadProgressSteps');
+  if (!ul || !steps || !steps.length) return;
 
-    // Hitta aktuell fas
-    let activeIdx = 0;
-    for (let i = 0; i < phases.length; i++) {
-      if (elapsed >= phases[i].startSec) activeIdx = i;
-    }
-    // Cap så vi inte går förbi sista fasen även om analysen drar ut
-    activeIdx = Math.min(activeIdx, phases.length - 1);
+  ul.innerHTML = steps.map((s) => {
+    const done = s.status === 'done';
+    const icon = done
+      ? '<span class="step-icon done">✓</span>'
+      : '<span class="step-icon"><span class="inline-spinner"></span></span>';
+    const detail = s.detail ? `<span class="step-detail">${escapeHtml(s.detail)}</span>` : '';
+    return `<li class="${done ? 'done' : 'active'}">${icon}<span class="step-body"><span class="step-label">${escapeHtml(s.label)}</span>${detail}</span></li>`;
+  }).join('');
 
-    phaseEl.textContent = phases[activeIdx].text;
-
-    // Markera steg
-    document.querySelectorAll('#uploadProgressSteps li').forEach((li, i) => {
-      if (i < activeIdx) {
-        li.classList.add('done');
-        li.classList.remove('active');
-      } else if (i === activeIdx) {
-        li.classList.add('active');
-        li.classList.remove('done');
-      } else {
-        li.classList.remove('active', 'done');
-      }
-    });
-
-    // Progress-bar: linjär mot estimate, men stannar vid 92% tills servern svarar
-    const pct = Math.min(92, (elapsed / estimate) * 92);
-    fillEl.style.width = `${pct}%`;
-
-    // Tids-räknare
-    const remaining = Math.max(0, estimate - Math.round(elapsed));
-    estEl.textContent = remaining > 0 ? `~${remaining} sek kvar` : 'snart klart…';
-  }
-
-  tick();
-  _uploadProgressTimer = setInterval(tick, 500);
+  const doneCount = steps.filter((s) => s.status === 'done').length;
+  const pct = Math.min(95, Math.round((doneCount / _EXPECTED_STEPS) * 88) + 6);
+  document.getElementById('uploadProgressFill').style.width = `${pct}%`;
 }
 
 function finishUploadProgress() {
-  // Markera alla steg som klara + dra fill till 100%
   if (_uploadProgressTimer) {
     clearInterval(_uploadProgressTimer);
     _uploadProgressTimer = null;
@@ -1279,13 +1247,13 @@ function finishUploadProgress() {
   document.querySelectorAll('#uploadProgressSteps li').forEach((li) => {
     li.classList.remove('active');
     li.classList.add('done');
+    const ic = li.querySelector('.step-icon');
+    if (ic) { ic.classList.add('done'); ic.innerHTML = '✓'; }
   });
   const fill = document.getElementById('uploadProgressFill');
   if (fill) fill.style.width = '100%';
-  const phase = document.getElementById('uploadProgressPhase');
-  if (phase) phase.textContent = 'Klart!';
   const est = document.getElementById('uploadProgressEstimate');
-  if (est) est.textContent = '✓';
+  if (est) est.textContent += ' · klart';
 }
 
 function hideUploadProgress() {
@@ -1351,7 +1319,7 @@ function renderMultiAgentResult(data) {
   const firstCaseId = firstResult?.saved_case?.id;
   if (firstCaseId) {
     showCaseBanner(firstResult.saved_case, firstResult.analysis);
-    renderInsights(firstResult.saved_case.insights);
+    renderInsights(firstResult.saved_case.insights, firstCaseId);
     loadDraftPanel(firstCaseId);
 
     const redirect = document.getElementById('mfEditorRedirect');
@@ -1461,7 +1429,7 @@ function renderAgentResult(analysis, savedCase) {
 
   if (savedCase && savedCase.id) {
     showCaseBanner(savedCase, analysis);
-    renderInsights(savedCase.insights);
+    renderInsights(savedCase.insights, savedCase.id);
     loadDraftPanel(savedCase.id);
     postAgentSummary(analysis, savedCase);
 
@@ -1486,6 +1454,7 @@ function renderAgentResult(analysis, savedCase) {
 
 // Agenten sammanfattar fynd + pekar på nästa steg (guidat flöde)
 function postAgentSummary(analysis, savedCase) {
+  _lastUploadCaseId = savedCase?.id || _lastUploadCaseId;
   const chat = document.getElementById('chatMessages');
   if (!chat) return;
   const s = analysis.summary || {};
@@ -1754,7 +1723,7 @@ const _OBSERVATION_LABELS = {
   info:       { label: 'Info',     icon: 'i' },
 };
 
-function renderInsights(insights) {
+function renderInsights(insights, caseId) {
   const panel = document.getElementById('insightsPanel');
   const content = document.getElementById('insightsContent');
   const meta = document.getElementById('insightsMeta');
@@ -1801,12 +1770,19 @@ function renderInsights(insights) {
     sections.push(`
       <div class="insights-section">
         <p class="insights-section-head">Frågor agenten har för dig</p>
-        ${questions.map((q) => `
-          <div class="insight-item">
+        <p class="insights-section-hint">Dina svar blir projektfakta som agenten använder i kravsvaren.</p>
+        ${questions.map((q, i) => `
+          <div class="insight-item" data-q-index="${i}">
             <span class="insight-icon" data-type="question" title="Fråga">?</span>
             <div class="insight-body">
               <p class="insight-title">${escapeHtml(q.question || '')}</p>
               ${q.why_it_matters ? `<p class="insight-question-why">${escapeHtml(q.why_it_matters)}</p>` : ''}
+              ${q.answer
+                ? `<p class="insight-answer">✓ <strong>Ditt svar:</strong> ${escapeHtml(q.answer)}</p>`
+                : `<div class="insight-answer-form">
+                     <input type="text" class="insight-answer-input" placeholder="Svara här…" />
+                     <button class="btn btn-primary btn-sm insight-answer-save">Spara</button>
+                   </div>`}
             </div>
           </div>
         `).join('')}
@@ -1834,6 +1810,33 @@ function renderInsights(insights) {
 
   content.innerHTML = sections.join('');
   panel.hidden = false;
+
+  // Inline-svar på agentens frågor
+  const cid = caseId || _lastUploadCaseId;
+  content.querySelectorAll('.insight-item[data-q-index]').forEach((item) => {
+    const btn = item.querySelector('.insight-answer-save');
+    const inp = item.querySelector('.insight-answer-input');
+    if (!btn || !inp || !cid) return;
+    const save = async () => {
+      const answer = inp.value.trim();
+      if (!answer) return;
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/api/cases/${encodeURIComponent(cid)}/insights/answer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index: Number(item.dataset.qIndex), answer }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        item.querySelector('.insight-answer-form').outerHTML =
+          `<p class="insight-answer">✓ <strong>Ditt svar:</strong> ${escapeHtml(answer)}</p>`;
+      } catch {
+        btn.disabled = false;
+      }
+    };
+    btn.addEventListener('click', save);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  });
 }
 
 // ---------- ANBUD-BANNER ------------------------------------------------
@@ -2449,18 +2452,32 @@ async function renderKalkylatorForCase(caseId) {
     document.getElementById('kalkylatorMeta').innerHTML =
       `${stateChip(c)}${metaParts.length ? ' · ' + metaParts.join(' · ') : ''}` || '—';
 
-    // Fortfarande under analys → visa väntläge och auto-uppdatera
+    // Fortfarande under analys → visa agentens arbetssteg live och auto-uppdatera
     if (c.state === 'INTAKE' || c.state === 'EXTRACTING') {
       document.getElementById('mfEditorPanel').hidden = true;
       const noMf = document.getElementById('kalkylatorNoMf');
       noMf.hidden = false;
-      noMf.innerHTML = '<p><span class="inline-spinner"></span> Anbudet analyseras fortfarande — mängdförteckning och krav dyker upp så snart det är klart.</p>'
-        + '<p class="muted small">Sidan uppdateras automatiskt.</p>';
+
+      let stepsHtml = '';
+      try {
+        const st = await (await fetch(`/api/cases/${encodeURIComponent(caseId)}/status`)).json();
+        if (st.progress?.length) {
+          stepsHtml = '<ul class="upload-progress-steps live compact">' + st.progress.map((s) => {
+            const done = s.status === 'done';
+            const icon = done ? '<span class="step-icon done">✓</span>'
+              : '<span class="step-icon"><span class="inline-spinner"></span></span>';
+            const detail = s.detail ? `<span class="step-detail">${escapeHtml(s.detail)}</span>` : '';
+            return `<li class="${done ? 'done' : 'active'}">${icon}<span class="step-body"><span class="step-label">${escapeHtml(s.label)}</span>${detail}</span></li>`;
+          }).join('') + '</ul>';
+        }
+      } catch {}
+
+      noMf.innerHTML = '<p><strong>Agenten arbetar med anbudet.</strong> Mängdförteckning och krav dyker upp så snart analysen är klar — sidan uppdateras automatiskt.</p>'
+        + stepsHtml;
       clearTimeout(_kalkPoll);
       _kalkPoll = setTimeout(() => {
         if (location.hash.includes(`/kalkylator/${caseId}`)) renderKalkylatorForCase(caseId);
-      }, 4000);
-      // Visa ändå hero + tomma stats, sedan retur
+      }, 3000);
       document.getElementById('kalkStatTotal').textContent = '—';
       document.getElementById('kalkStatLines').textContent = '—';
       document.getElementById('kalkStatPriced').textContent = '—';
@@ -2726,7 +2743,7 @@ async function loadCaseInEditor(caseId) {
     lastAnalysis = fakeAnalysis;
 
     showCaseBanner(fakeSavedCase, fakeAnalysis);
-    renderInsights(fakeSavedCase.insights);
+    renderInsights(fakeSavedCase.insights, fakeSavedCase.id);
 
     // Filer-panel
     const filesPanel = document.getElementById('filesPanel');
@@ -3189,6 +3206,14 @@ function scrollChatToBottom() {
   }, 30);
 }
 
+// Vilket anbud pratar användaren om? Route-param först, annars senaste upp.
+let _lastUploadCaseId = null;
+function getCurrentCaseId() {
+  const m = location.hash.match(/^#\/(?:kalkylator|krav|slutfor|granska|anbud\/edit)\/([^/?]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  return _lastUploadCaseId;
+}
+
 async function sendChat(userText) {
   chatBusy = true;
   ['chatSendBtn', 'chatSendBtnBottom'].forEach((id) => {
@@ -3203,7 +3228,43 @@ async function sendChat(userText) {
   agentEl.classList.add('thinking');
   const bubble = agentEl.querySelector('.chat-bubble');
 
+  // Bubblan har två delar: agentens arbetssteg (verktyg) + löpande text
+  const stepsEl = document.createElement('div');
+  stepsEl.className = 'agent-steps';
+  stepsEl.hidden = true;
+  const textEl = document.createElement('div');
+  textEl.className = 'agent-text';
+  bubble.textContent = '';
+  bubble.appendChild(stepsEl);
+  bubble.appendChild(textEl);
+
   let full = '';
+
+  function addStep(data) {
+    stepsEl.hidden = false;
+    const row = document.createElement('div');
+    row.className = 'agent-step working';
+    row.dataset.tool = data.name;
+    row.innerHTML = `<span class="step-icon"><span class="inline-spinner"></span></span>` +
+      `<span class="step-body"><span class="step-label">${escapeHtml(data.label)}…</span></span>`;
+    stepsEl.appendChild(row);
+    scrollChatToBottom();
+    return row;
+  }
+
+  function completeStep(data) {
+    const rows = stepsEl.querySelectorAll(`.agent-step.working[data-tool="${CSS.escape(data.name)}"]`);
+    const row = rows[rows.length - 1] || addStep(data);
+    row.classList.remove('working');
+    row.classList.add('done');
+    const route = data.route
+      ? ` <button class="btn btn-ghost btn-xs" data-route="${escapeAttr(data.route)}">${escapeHtml(data.route_label || 'Öppna')} →</button>`
+      : '';
+    row.innerHTML = `<span class="step-icon done">✓</span>` +
+      `<span class="step-body"><span class="step-label">${escapeHtml(data.label)}</span>` +
+      `<span class="step-detail">${escapeHtml(data.summary || '')}${route}</span></span>`;
+    scrollChatToBottom();
+  }
 
   try {
     const context = lastAnalysis
@@ -3219,7 +3280,7 @@ async function sendChat(userText) {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: chatHistory, context }),
+      body: JSON.stringify({ messages: chatHistory, context, case_id: getCurrentCaseId() }),
     });
 
     if (!res.ok || !res.body) {
@@ -3244,8 +3305,12 @@ async function sendChat(userText) {
         try { data = JSON.parse(line.slice(6)); } catch { continue; }
         if (data.type === 'token') {
           full += data.text;
-          bubble.textContent = full;
+          textEl.innerHTML = renderMarkdownLight(full);
           scrollChatToBottom();
+        } else if (data.type === 'tool_start') {
+          addStep(data);
+        } else if (data.type === 'tool_result') {
+          completeStep(data);
         } else if (data.type === 'error') {
           throw new Error(data.message);
         } else if (data.type === 'done') {
@@ -3257,8 +3322,8 @@ async function sendChat(userText) {
     chatHistory.push({ role: 'assistant', content: full });
     persistCurrentChat();
   } catch (e) {
-    bubble.textContent = `⚠ ${e.message || 'Något gick fel'}`;
-    bubble.style.color = 'var(--tegel)';
+    textEl.textContent = `⚠ ${e.message || 'Något gick fel'}`;
+    textEl.style.color = 'var(--tegel)';
     chatHistory.pop();
   } finally {
     agentEl.classList.remove('thinking');

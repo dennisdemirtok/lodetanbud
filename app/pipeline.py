@@ -26,12 +26,28 @@ from app import pdf_extractor
 from app import pdf_mf_parser
 from app import requirement_extractor
 from app import states
-from app.db import DATA_ROOT, Case, SessionLocal
+from app.db import DATA_ROOT, Case, SessionLocal, log_event
 from app.parser import parse_csv_bytes
 from app.worker import register
 
 # Rader under denna confidence skickar casen till granskning (AP2)
 REVIEW_THRESHOLD = 0.9
+
+
+async def _progress(case_id: str, step: str, label: str, *, done: bool = False, detail: str | None = None) -> None:
+    """Emitta ett analysis_progress-event — frontend pollar och visar
+    arbetsstegen live (Harvey-stil: riktiga steg, riktiga räknare)."""
+    try:
+        async with SessionLocal() as session:
+            await log_event(session, case_id, "analysis_progress", {
+                "step": step,
+                "label": label,
+                "status": "done" if done else "working",
+                **({"detail": detail} if detail else {}),
+            })
+            await session.commit()
+    except Exception:
+        pass  # progress får aldrig fälla analysen
 
 
 def classify_one(filename: str, data: bytes) -> tuple[lodet_agent.FileInfo, dict | None]:
@@ -152,20 +168,39 @@ async def run_parse_package(job) -> dict:
         await session.commit()
 
     pairs: list[tuple[str, bytes, str]] = []
+    total_bytes = 0
     for ref in file_refs:
         p = DATA_ROOT / ref["path"]
-        pairs.append((ref["filename"], p.read_bytes(), ref["path"]))
+        data = p.read_bytes()
+        total_bytes += len(data)
+        pairs.append((ref["filename"], data, ref["path"]))
+
+    mb = total_bytes / 1_048_576
+    await _progress(case_id, "read", f"Läser {len(pairs)} filer ({mb:.0f} MB)", done=True)
+    await _progress(case_id, "classify", f"Klassificerar {len(pairs)} dokument")
 
     # CPU-tungt (pypdf/openpyxl/pdfplumber) i tråd så event-loopen inte blockeras
     file_infos, parsed_mf, af_text, rescue_pages, af_pages = await asyncio.to_thread(_classify_batch, pairs)
 
+    n_mf = len((parsed_mf or {}).get("lines") or [])
+    classify_detail = []
+    if n_mf:
+        classify_detail.append(f"mängdförteckning: {n_mf} rader")
+    if af_pages:
+        classify_detail.append(f"AF-dokument: {len(af_pages)} sidor")
+    await _progress(case_id, "classify", f"{len(pairs)} dokument klassificerade",
+                    done=True, detail=" · ".join(classify_detail) or None)
+
     # LLM-rescue: sidor där PDF-tabellextraktionen misslyckades
     if rescue_pages and llm.is_configured():
+        await _progress(case_id, "rescue", f"Läser {min(len(rescue_pages), 12)} svårlästa MF-sidor med Claude")
         rescued = await _llm_rescue_mf(case_id, rescue_pages)
         if rescued:
             if parsed_mf is None:
                 parsed_mf = {"metadata": {}, "lines": []}
             parsed_mf["lines"] = (parsed_mf.get("lines") or []) + rescued
+        await _progress(case_id, "rescue", "Svårlästa MF-sidor räddade",
+                        done=True, detail=f"{len(rescued)} rader återskapade" if rescued else None)
 
     analysis = lodet_agent.analyze_package(file_infos, parsed_mf)
     files_dict = analysis["files"]
@@ -175,7 +210,17 @@ async def run_parse_package(job) -> dict:
     for f in files_dict:
         f["storage_path"] = path_by_name.get(f.get("filename"))
 
-    # LLM-stegen — var och en med egen fallback, som tidigare
+    # LLM-stegen — kravmatrisen (tyngst) startas parallellt med de lättare
+    # stegen; var och en med egen fallback, som tidigare
+    n_sections = len(af_parser.split_af_sections(af_pages)) if af_pages else 0
+    if n_sections:
+        await _progress(case_id, "krav", f"Extraherar krav ur AF ({n_sections} sektioner)",
+                        detail="varje krav citatverifieras mot källtexten")
+    matrix_task = asyncio.create_task(_safe_matrix(af_pages, case_id))
+
+    await _progress(case_id, "claude", "Claude analyserar paketet",
+                    detail="dokumentkrav · observationer · lärdomar")
+
     try:
         extracted = await lesson_extractor.extract_lessons(
             package_summary=analysis["summary"], parsed_mf=parsed_mf, files=files_dict,
@@ -202,11 +247,21 @@ async def run_parse_package(job) -> dict:
     except Exception:
         insights = {"observations": [], "questions": [], "vendor_templates": []}
 
+    n_q = len(insights.get("questions") or [])
+    await _progress(case_id, "claude", "Paketet analyserat", done=True,
+                    detail=f"{len(required_docs)} dokumentkrav · {n_q} frågor till dig" if n_q
+                    else f"{len(required_docs)} dokumentkrav")
+
     # Kravmatris (AP3): hela AF → källänkade, citatverifierade krav
-    try:
-        matrix = await af_parser.extract_matrix(af_pages, case_id=case_id)
-    except Exception:
-        matrix = []
+    matrix = await matrix_task
+    if n_sections:
+        skall_n = sum(1 for r in matrix if r.get("kind") == "skall")
+        unver_n = sum(1 for r in matrix if not (r.get("source") or {}).get("verified"))
+        detail = f"{skall_n} skall-krav"
+        if unver_n:
+            detail += f" · {unver_n} citat ej verifierade (flaggade)"
+        await _progress(case_id, "krav", f"{len(matrix)} krav extraherade och citatverifierade",
+                        done=True, detail=detail)
 
     if matrix:
         skall = sum(1 for r in matrix if r.get("kind") == "skall")
@@ -222,6 +277,8 @@ async def run_parse_package(job) -> dict:
             "action_label": "Öppna kravmatrisen",
             "action_route": f"#/krav/{case_id}",
         })
+
+    await _progress(case_id, "save", "Sparar i anbudsarkivet")
 
     await case_archive.update_case_full(
         case_id,
@@ -264,6 +321,11 @@ async def run_parse_package(job) -> dict:
             await states.transition(session, case, target)
         await session.commit()
 
+    done_detail = f"{len(lines)} MF-rader · {len(matrix)} krav"
+    if low_conf:
+        done_detail += f" · {low_conf} rader behöver granskas"
+    await _progress(case_id, "save", "Klart — anbudet är redo", done=True, detail=done_detail)
+
     return {
         "case_id": case_id,
         "file_count": len(files_dict),
@@ -274,6 +336,13 @@ async def run_parse_package(job) -> dict:
         "requirement_count": len(matrix),
         "state": target,
     }
+
+
+async def _safe_matrix(af_pages: list[str], case_id: str) -> list[dict]:
+    try:
+        return await af_parser.extract_matrix(af_pages, case_id=case_id)
+    except Exception:
+        return []
 
 
 async def _llm_rescue_mf(case_id: str, rescue_pages: list[dict], max_pages: int = 12) -> list[dict]:

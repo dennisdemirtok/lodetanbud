@@ -329,21 +329,13 @@
 
               <div id="uploadProgress" class="upload-progress" hidden>
                 <div class="upload-progress-head">
-                  <h3 class="upload-progress-title">Analyserar förfrågningsunderlaget</h3>
-                  <span class="upload-progress-estimate" id="uploadProgressEstimate">~60 sek kvar</span>
+                  <h3 class="upload-progress-title">Agenten arbetar med förfrågningsunderlaget</h3>
+                  <span class="upload-progress-estimate" id="uploadProgressEstimate">0:00</span>
                 </div>
-                <p class="upload-progress-phase" id="uploadProgressPhase">Läser filer…</p>
                 <div class="upload-progress-bar">
                   <div class="upload-progress-bar-fill" id="uploadProgressFill"></div>
                 </div>
-                <ul class="upload-progress-steps" id="uploadProgressSteps">
-                  <li data-phase="read">Läser och packar upp filer</li>
-                  <li data-phase="classify">Klassificerar dokumenttyper</li>
-                  <li data-phase="af">Extraherar AF-text</li>
-                  <li data-phase="claude-req">Frågar Claude vilka dokument anbudet ska innehålla</li>
-                  <li data-phase="claude-lessons">Extraherar lärdomar för kunskapsbasen</li>
-                  <li data-phase="save">Sparar i arkivet</li>
-                </ul>
+                <ul class="upload-progress-steps live" id="uploadProgressSteps"></ul>
               </div>
 
               <div id="caseCreatedBanner" class="case-banner" hidden>

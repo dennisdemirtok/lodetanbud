@@ -61,12 +61,3 @@ def extract_zip(data: bytes) -> list[ExtractedFile]:
         raise ValueError("Korrupt eller ogiltig ZIP-fil")
 
     return out
-
-
-def group_by_folder(files: list[ExtractedFile]) -> dict[str, list[ExtractedFile]]:
-    """Gruppera filer per toppmapp (varje mapp = ett anbud)."""
-    grouped: dict[str, list[ExtractedFile]] = {}
-    for f in files:
-        key = f.folder or "(rotmapp)"
-        grouped.setdefault(key, []).append(f)
-    return grouped
