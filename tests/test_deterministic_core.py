@@ -125,3 +125,30 @@ def test_label_words_rejected_as_project_name():
     assert _clean_label_value("DATUM") is None
     assert _clean_label_value("DOKUMENTNUMMER") is None
     assert _clean_label_value("VÄG 875 GC SUNDBORN") == "VÄG 875 GC SUNDBORN"
+
+
+# ---------- Prismotorn: exclude får inte filtrera bort NULL-case-obs --------
+
+@pytest.mark.anyio
+async def test_exclude_keeps_standalone_observations(tmp_path, monkeypatch):
+    """Importerade MAP-obs har case_id=NULL. SQL:s trevärdeslogik gör att
+    'case_id != x' filtrerar bort NULL-rader — kaskaden ska behålla dem."""
+    import importlib
+    monkeypatch.setenv("LODET_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    import app.db as dbmod
+    importlib.reload(dbmod)
+    import app.price_engine as pe
+    importlib.reload(pe)
+
+    await dbmod.init_db()
+    async with dbmod.SessionLocal() as session:
+        session.add(dbmod.PriceObservation(
+            id="obs_t1", case_id=None, ama_code="DCB.313", description="Fyllning",
+            unit="m2", unit_price=9.0, quantity=100, observed_at="2026-01-01",
+            source="map_netto", won=False, meta={},
+        ))
+        await session.commit()
+
+    s = await pe.suggest("DCB.313", "Fyllning", "m2", exclude_case_id="case_nagot")
+    assert s is not None and s["n"] == 1  # NULL-obs överlever exclude

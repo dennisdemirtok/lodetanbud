@@ -24,7 +24,7 @@ import statistics
 from datetime import date, timedelta
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select, text as sa_text
+from sqlalchemy import or_, select, text as sa_text
 
 from app.db import Case, MfLine, PriceObservation, SessionLocal, engine, log_event, new_id
 
@@ -126,7 +126,8 @@ async def _fetch_exact(session, code: str, unit: str | None, exclude_case_id: st
     if unit:
         q = q.where(PriceObservation.unit == unit)
     if exclude_case_id:
-        q = q.where(PriceObservation.case_id != exclude_case_id)
+        q = q.where(or_(PriceObservation.case_id.is_(None),
+                        PriceObservation.case_id != exclude_case_id))
     if since:
         q = q.where(PriceObservation.observed_at >= since)
     q = q.order_by(PriceObservation.observed_at.desc()).limit(200)
@@ -148,7 +149,7 @@ async def _fetch_similar(session, description: str, unit: str | None,
             LIMIT 10
         """.format(
             unit_clause="AND unit = :u" if unit else "",
-            exclude_clause="AND case_id != :ex" if exclude_case_id else "",
+            exclude_clause="AND (case_id IS NULL OR case_id != :ex)" if exclude_case_id else "",
         )
         params: dict = {"d": description, "floor": SIMILARITY_FLOOR_PG}
         if unit:
@@ -171,7 +172,8 @@ async def _fetch_similar(session, description: str, unit: str | None,
     if unit:
         q = q.where(PriceObservation.unit == unit)
     if exclude_case_id:
-        q = q.where(PriceObservation.case_id != exclude_case_id)
+        q = q.where(or_(PriceObservation.case_id.is_(None),
+                        PriceObservation.case_id != exclude_case_id))
     candidates = (await session.execute(q.limit(500))).scalars().all()
     nd = description.strip().lower()
     scored = []

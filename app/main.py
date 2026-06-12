@@ -370,8 +370,17 @@ async def _stage_package(source: str, source_name: str, pairs: list[tuple[str, b
     return case_id
 
 
+# Generiska mappnamn som inte säger vilket PROJEKT det är
+_GENERIC_FOLDER_RE = re.compile(
+    r"förfrågningsunderlag|upphandlingsdokument|bilagor|ffu|anbudshandlingar|"
+    r"dokument|underlag|handlingar", re.IGNORECASE,
+)
+
+
 def _common_top_folder(paths: list[str]) -> str | None:
-    """Vanligaste toppmappen i relativa sökvägar — blir paketnamn."""
+    """Bästa mappnamnet ur relativa sökvägar — första ICKE-generiska
+    segmentet i den vanligaste mappkedjan ("1 Förfrågningsunderlag 2/
+    Haga Entré/…" → "Haga Entré")."""
     from collections import Counter
     tops = Counter()
     for p in paths:
@@ -381,7 +390,20 @@ def _common_top_folder(paths: list[str]) -> str | None:
     if not tops:
         return None
     top, n = tops.most_common(1)[0]
-    return top if n >= max(2, len(paths) // 2) else None
+    if n < max(2, len(paths) // 2):
+        return None
+    if not _GENERIC_FOLDER_RE.search(top):
+        return top
+    # Toppen är generisk — leta första icke-generiska segment en nivå ner
+    seconds = Counter()
+    for p in paths:
+        parts = p.replace("\\", "/").strip("/").split("/")
+        if len(parts) > 2 and parts[0] == top and parts[1]:
+            seconds[parts[1]] += 1
+    for seg, _cnt in seconds.most_common(3):
+        if not _GENERIC_FOLDER_RE.search(seg) and not zip_handler.is_zip_filename(seg):
+            return seg
+    return top
 
 
 @app.post("/api/package/analyze")
@@ -396,7 +418,7 @@ async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONRespon
         raise HTTPException(status_code=400, detail="Inga filer mottagna")
 
     pairs: list[tuple[str, bytes]] = []
-    zip_names: list[str] = []
+    zips: list[tuple[str, int]] = []  # (basnamn, bytes) — störst vinner namnet
 
     for f in files:
         if not f.filename:
@@ -407,7 +429,7 @@ async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONRespon
                 extracted = zip_handler.extract_zip(data)
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
-            zip_names.append(f.filename.rsplit(".", 1)[0].split("/")[-1])
+            zips.append((f.filename.rsplit(".", 1)[0].split("/")[-1], len(data)))
             # relative_path (med mappar) som filnamn — mappnamn bär
             # klassificeringssignal (t.ex. "10. Mängdförteckning/")
             pairs.extend((x.relative_path, x.data) for x in extracted)
@@ -417,10 +439,12 @@ async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONRespon
     if not pairs:
         raise HTTPException(status_code=400, detail="Inga giltiga filer i uppladdningen")
 
-    source_name = (
-        zip_names[0] if len(zip_names) == 1
-        else _common_top_folder([p for p, _ in pairs]) or "uppladdat-paket"
+    # Paketnamn: största icke-generiska zip:en, annars bästa mappnamnet
+    zip_name = next(
+        (n for n, _sz in sorted(zips, key=lambda z: -z[1]) if not _GENERIC_FOLDER_RE.search(n)),
+        None,
     )
+    source_name = zip_name or _common_top_folder([p for p, _ in pairs]) or "uppladdat-paket"
 
     case_id = await _stage_package(
         source="zip" if zip_names else ("folder" if len(pairs) > 1 else "single"),

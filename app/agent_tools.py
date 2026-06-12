@@ -199,8 +199,8 @@ async def _suggest_prices(args: dict) -> dict:
                 examples.append({
                     "ama_code": l.get("ama_code"),
                     "beskrivning": (l.get("description") or "")[:60],
-                    "median_kr": s.get("median"),
-                    "spann": f"{s.get('p25')}–{s.get('p75')} kr",
+                    "median_kr": s.get("unit_price"),
+                    "spann": f"{s.get('low')}–{s.get('high')} kr",
                     "antal_observationer": s.get("n"),
                     "basis": s["basis"],
                 })
