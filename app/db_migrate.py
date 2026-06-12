@@ -120,22 +120,27 @@ async def migrate_sqlite_to_postgres() -> int:
 
 
 async def migrate_legacy_json() -> int:
-    """Returnerar antal migrerade cases."""
+    """Migrera legacy JSON-cases EN gång. Efter bearbetning döps filen om
+    till .json.migrated så den aldrig återimporteras — annars återskapas
+    raderade cases vid varje omstart (id försvinner ur DB → re-migreras)."""
     migrated = 0
     for directory in _legacy_dirs():
         for path in sorted(directory.glob("case_*.json")):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
+                _mark_migrated(path)
                 continue
 
             case_id = data.get("id")
             if not case_id:
+                _mark_migrated(path)
                 continue
 
             async with SessionLocal() as session:
                 if await session.get(Case, case_id) is not None:
-                    continue  # redan migrerad
+                    _mark_migrated(path)  # redan i DB → markera så den inte återimporteras
+                    continue
 
                 parsed_mf = data.get("parsed_mf") or {}
                 mf_meta = parsed_mf.get("metadata") or {}
@@ -174,5 +179,15 @@ async def migrate_legacy_json() -> int:
                 await log_event(session, case_id, "migrated_from_json", {"path": str(path)})
                 await session.commit()
                 migrated += 1
+            _mark_migrated(path)
 
     return migrated
+
+
+def _mark_migrated(path: Path) -> None:
+    """Döp om en bearbetad legacy-JSON så den inte återimporteras. Data
+    bevaras på volymen (.json.migrated), bara osynlig för glob('case_*.json')."""
+    try:
+        path.rename(path.with_suffix(".json.migrated"))
+    except OSError:
+        pass
