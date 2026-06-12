@@ -4138,3 +4138,15 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   border-radius: 8px;
   padding: 7px 10px;
 }
+
+/* hidden-attributet ska ALLTID vinna över display-regler (case-banner-buggen:
+   display:flex på klassen slog ut UA-stylesheetets [hidden]) */
+[hidden] { display: none !important; }
+.md-h { display: block; margin: 10px 0 4px; font-size: 0.98rem; }
+.md-li { display: block; padding-left: 12px; }
+.agent-text code {
+  background: var(--bg-sidebar, #F4EFE7);
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 0.85em;
+}

@@ -2869,12 +2869,19 @@ function typeShort(t) {
 }
 
 function renderMarkdownLight(text) {
-  return escapeHtml(text)
+  const esc = escapeHtml(text);
+  // Blockvis: rubriker och listor per rad, sedan styckebrytning
+  const lines = esc.split('\n').map((line) => {
+    if (/^#{1,4}\s+/.test(line)) return `<strong class="md-h">${line.replace(/^#{1,4}\s+/, '')}</strong>`;
+    if (/^[-•]\s+/.test(line)) return `<span class="md-li">• ${line.replace(/^[-•]\s+/, '')}</span>`;
+    if (/^\d+\.\s+/.test(line)) return `<span class="md-li">${line}</span>`;
+    return line;
+  });
+  return ('<p>' + lines.join('\n')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/\n/g, '<br>')
-    .replace(/^/, '<p>')
-    .replace(/$/, '</p>');
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n\n+/g, '</p><p>')
+    .replace(/\n/g, '<br>') + '</p>');
 }
 
 function saveMfToHistory(parsedMf) {
