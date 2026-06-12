@@ -50,12 +50,24 @@ def _row_to_kwargs(table: str, row: sqlite3.Row) -> dict:
 
 async def migrate_sqlite_to_postgres() -> int:
     """Engångsflytt av volymens SQLite-data in i Postgres. Returnerar antal
-    flyttade rader. No-op när engine inte är Postgres eller filen saknas."""
+    flyttade rader. No-op när engine inte är Postgres, filen saknas, ELLER
+    migreringen redan körts (markör-event) — annars återimporteras raderade
+    cases från SQLite vid varje omstart (id försvinner ur PG → re-import)."""
+    from sqlalchemy import select as _select
+
     if engine.dialect.name != "postgresql":
         return 0
 
     sqlite_path = Path(os.getenv("LODET_DATA_DIR", "/data")) / "lodet.db"
     if not sqlite_path.exists():
+        return 0
+
+    # Engångsgrind: har vi redan migrerat? Då aldrig igen.
+    async with SessionLocal() as session:
+        done = (await session.execute(
+            _select(Event).where(Event.kind == "sqlite_migration_complete").limit(1)
+        )).scalar_one_or_none()
+    if done is not None:
         return 0
 
     from app.db import Document, Event, Job, MfLine, Requirement
@@ -112,10 +124,10 @@ async def migrate_sqlite_to_postgres() -> int:
     finally:
         con.close()
 
-    if moved:
-        async with SessionLocal() as session:
-            await log_event(session, None, "migrated_from_sqlite", {"rows": moved})
-            await session.commit()
+    # Markör: migreringen är klar — körs aldrig igen (även om moved=0)
+    async with SessionLocal() as session:
+        await log_event(session, None, "sqlite_migration_complete", {"rows": moved, "from": str(sqlite_path)})
+        await session.commit()
     return moved
 
 
