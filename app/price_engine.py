@@ -245,3 +245,62 @@ async def observation_count() -> int:
         return (await session.execute(
             select(func.count()).select_from(PriceObservation)
         )).scalar_one()
+
+
+async def import_historic(
+    project_name: str,
+    observed_at: str | None,
+    region: str | None,
+    posts: list[dict],
+    source: str = "map_netto",
+    import_key: str | None = None,
+) -> dict:
+    """Importera historiska prisobservationer (t.ex. ur MAP-kalkyler, AP4-backfill).
+
+    Idempotent per (import_key): tar bort tidigare observationer med samma
+    import_key i meta innan insert, så omkörning inte dubblerar. import_key
+    default = project_name + observed_at."""
+    key = import_key or f"{project_name}|{observed_at or ''}"
+    obs_date = (observed_at or date.today().isoformat())[:10]
+
+    async with SessionLocal() as session:
+        # Rensa tidigare import med samma nyckel (Postgres: jsonb ->>)
+        if engine.dialect.name == "postgresql":
+            await session.execute(sa_text(
+                "DELETE FROM price_observations WHERE meta->>'import_key' = :k"
+            ), {"k": key})
+        else:
+            existing = (await session.execute(select(PriceObservation))).scalars().all()
+            for o in existing:
+                if (o.meta or {}).get("import_key") == key:
+                    await session.delete(o)
+
+        count = 0
+        for p in posts:
+            price = p.get("unit_price")
+            if price is None or float(price) <= 0:
+                continue
+            ama = (p.get("ama_code") or "").strip()
+            if not ama:
+                continue
+            session.add(PriceObservation(
+                id=new_id("obs"),
+                case_id=None,
+                ama_code=ama,
+                description=p.get("description"),
+                unit=p.get("unit"),
+                quantity=p.get("quantity"),
+                unit_price=float(price),
+                region=region,
+                observed_at=obs_date,
+                source=source,
+                project_name=project_name,
+                meta={"import_key": key, "n_resources": p.get("n_resources")},
+            ))
+            count += 1
+
+        await log_event(session, None, "historic_prices_imported", {
+            "project": project_name, "count": count, "source": source, "import_key": key,
+        })
+        await session.commit()
+        return {"imported": count, "import_key": key}

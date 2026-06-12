@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -692,6 +693,35 @@ async def api_price_suggest_bulk(payload: dict = Body(...)) -> JSONResponse:
         "suggestions": suggestions,
         "observation_count": await price_engine.observation_count(),
     })
+
+
+@app.post("/api/import/historic")
+async def api_import_historic(request: Request, payload: dict = Body(...)) -> JSONResponse:
+    """Backfill av historisk prisdata (MAP-kalkyler m.m.). Gateär bakom
+    LODET_IMPORT_TOKEN — avstängd om env-variabeln saknas, så ingen öppen
+    skriv-endpoint på produktion."""
+    token = os.getenv("LODET_IMPORT_TOKEN")
+    if not token:
+        raise HTTPException(status_code=503, detail="Import är inte aktiverad (LODET_IMPORT_TOKEN saknas)")
+    if request.headers.get("X-Import-Token") != token:
+        raise HTTPException(status_code=401, detail="Ogiltig import-token")
+
+    project_name = (payload.get("project_name") or "").strip()
+    if not project_name:
+        raise HTTPException(status_code=400, detail="project_name saknas")
+    posts = payload.get("posts") or []
+    if not isinstance(posts, list) or len(posts) > 5000:
+        raise HTTPException(status_code=400, detail="posts saknas eller > 5000")
+
+    result = await price_engine.import_historic(
+        project_name=project_name,
+        observed_at=payload.get("observed_at"),
+        region=payload.get("region"),
+        posts=posts,
+        source=payload.get("source") or "map_netto",
+        import_key=payload.get("import_key"),
+    )
+    return JSONResponse(result)
 
 
 @app.post("/api/cases/{case_id}/price-suggestion-applied")
