@@ -536,6 +536,25 @@ function loadHistory() {
   catch { return []; }
 }
 
+// Nästa steg per state — driver den guidade hubben
+function nextStepFor(state) {
+  return ({
+    INTAKE:         { label: 'Analyserar…' },
+    EXTRACTING:     { label: 'Analyserar…' },
+    NEEDS_REVIEW:   { label: 'Granska extraktion' },
+    CALCULATING:    { label: 'Prissätt kalkyl' },
+    DRAFTING:       { label: 'Besvara krav' },
+    FORMALIA_CHECK: { label: 'Slutför' },
+    READY:          { label: 'Lämna in' },
+    SUBMITTED:      { label: 'Registrera utfall' },
+    AWARDED:        { label: 'Vunnet ✓' },
+    LOST:           { label: 'Förlorat' },
+  })[state] || { label: 'Öppna' };
+}
+
+let _activeBidsPoll = null;
+let _kalkPoll = null;
+
 async function renderActiveBids() {
   const el = document.getElementById('localBidsList');
   el.innerHTML = '<div class="empty-state"><p>Laddar anbud …</p></div>';
@@ -554,16 +573,18 @@ async function renderActiveBids() {
     el.innerHTML = cases.map((c) => {
       const reqCount = c.required_count || 0;
       const draftCount = c.draft_count || 0;
-      const progress = reqCount > 0 ? `${draftCount}/${reqCount} utkast` : '—';
+      const progress = reqCount > 0 ? `${draftCount}/${reqCount} utkast` : `${c.file_count} filer`;
+      const next = nextStepFor(c.state);
+      const busy = c.state === 'INTAKE' || c.state === 'EXTRACTING';
       return `
-        <div class="bid-row" data-case-id="${escapeHtml(c.id)}">
+        <div class="bid-row${busy ? ' busy' : ''}" data-case-id="${escapeHtml(c.id)}">
           <div>
             <div class="bid-name">${escapeHtml(c.project_name || c.source_name || '—')}${stateChip(c)}</div>
-            <div class="bid-meta">${escapeHtml(c.document_number || '')} ${c.document_number ? '· ' : ''}${c.file_count} filer · ${progress}</div>
+            <div class="bid-meta">${escapeHtml(c.document_number || '')} ${c.document_number ? '· ' : ''}${progress}</div>
           </div>
           <div class="bid-amount">${c.total_amount_sek ? fmtSEK.format(c.total_amount_sek) + ' kr' : '—'}</div>
+          <div class="bid-next"><span class="bid-next-label">${escapeHtml(next.label)}</span><span class="bid-next-arrow">→</span></div>
           <div class="bid-date">${formatRelDate(c.created_at)}</div>
-          <div></div>
         </div>
       `;
     }).join('');
@@ -573,6 +594,14 @@ async function renderActiveBids() {
         location.hash = `#/anbud/edit/${encodeURIComponent(row.dataset.caseId)}`;
       });
     });
+
+    // Auto-uppdatera om något anbud fortfarande analyseras
+    if (cases.some((c) => c.state === 'INTAKE' || c.state === 'EXTRACTING')) {
+      clearTimeout(_activeBidsPoll);
+      _activeBidsPoll = setTimeout(() => {
+        if (location.hash.startsWith('#/bids/active')) renderActiveBids();
+      }, 4000);
+    }
   } catch (e) {
     el.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
   }
@@ -720,6 +749,29 @@ function renderTemplate(id) {
   document.querySelectorAll('[data-show-for]').forEach((el) => {
     el.style.display = el.dataset.showFor === id ? '' : 'none';
   });
+
+  prefillCompanyInto(document.getElementById('tmplForm'));
+}
+
+// Fyll företagsfält i ett formulär från sparade inställningar (ersätter
+// gamla hårdkodade demo-värden)
+async function prefillCompanyInto(form) {
+  if (!form) return;
+  try {
+    const s = await (await fetch('/api/company')).json();
+    const map = {
+      company_name: s.company_name,
+      contact_name: s.contact_name,
+      contact_email: s.contact_email,
+      contact_phone: s.contact_phone,
+      organisationsnummer: s.organisationsnummer,
+      customer_name: s.default_customer,
+    };
+    for (const [name, val] of Object.entries(map)) {
+      const inp = form.querySelector(`[name="${name}"]`);
+      if (inp && !inp.value && val) inp.value = val;
+    }
+  } catch {}
 }
 
 function bindTemplateForm() {
@@ -1051,7 +1103,16 @@ async function handlePackageFiles(files) {
     const caseIds = data.case_ids || [];
     if (caseIds.length === 0) throw new Error('Inga cases skapades');
 
-    await pollCasesUntilDone(caseIds);
+    const outcome = await pollCasesUntilDone(caseIds);
+
+    if (outcome === 'timeout') {
+      // Analysen är seg men fortsätter på servern — landa mjukt, inte ett fel.
+      finishUploadProgress();
+      showBackgroundNotice(caseIds[0]);
+      setTimeout(hideUploadProgress, 800);
+      return;
+    }
+
     finishUploadProgress();
 
     const results = await Promise.all(caseIds.map(async (id) => {
@@ -1080,7 +1141,24 @@ async function handlePackageFiles(files) {
   }
 }
 
-async function pollCasesUntilDone(caseIds, { timeoutMs = 300000, intervalMs = 2000 } = {}) {
+// Mjuk landning när analysen drar ut på tiden — anbudet finns och blir klart.
+function showBackgroundNotice(caseId) {
+  const chat = document.getElementById('chatMessages');
+  if (chat) {
+    const el = document.createElement('div');
+    el.className = 'bg-notice';
+    el.innerHTML = `
+      <p><strong>Anbudet skapas i bakgrunden.</strong> Stora förfrågningsunderlag tar
+      någon minut extra att analysera klart — du behöver inte vänta kvar här.</p>
+      <button class="btn btn-primary btn-sm" data-route="#/anbud/edit/${escapeAttr(caseId)}">Öppna anbudet →</button>
+      <button class="btn btn-ghost btn-sm" data-route="#/dashboard">Visa alla anbud</button>`;
+    chat.appendChild(el);
+    scrollChatToBottom();
+  }
+}
+
+// Returnerar 'done' när alla klara, 'timeout' när taket nås, kastar vid jobbfel.
+async function pollCasesUntilDone(caseIds, { timeoutMs = 720000, intervalMs = 2500 } = {}) {
   const t0 = Date.now();
   while (true) {
     const statuses = await Promise.all(caseIds.map(async (id) => {
@@ -1098,11 +1176,9 @@ async function pollCasesUntilDone(caseIds, { timeoutMs = 300000, intervalMs = 20
     }
 
     const busy = valid.some((s) => s.state === 'INTAKE' || s.state === 'EXTRACTING');
-    if (valid.length === caseIds.length && !busy) return valid;
+    if (valid.length === caseIds.length && !busy) return 'done';
 
-    if (Date.now() - t0 > timeoutMs) {
-      throw new Error('Analysen tog för lång tid — kolla anbudet under Anbud-tabben om en stund');
-    }
+    if (Date.now() - t0 > timeoutMs) return 'timeout';
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
@@ -1387,6 +1463,7 @@ function renderAgentResult(analysis, savedCase) {
     showCaseBanner(savedCase, analysis);
     renderInsights(savedCase.insights);
     loadDraftPanel(savedCase.id);
+    postAgentSummary(analysis, savedCase);
 
     // Visa "öppna kalkylator"-redirect istället för att ladda MF-editorn inline
     const redirect = document.getElementById('mfEditorRedirect');
@@ -1405,6 +1482,47 @@ function renderAgentResult(analysis, savedCase) {
     if (redirect) redirect.hidden = true;
     agentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+}
+
+// Agenten sammanfattar fynd + pekar på nästa steg (guidat flöde)
+function postAgentSummary(analysis, savedCase) {
+  const chat = document.getElementById('chatMessages');
+  if (!chat) return;
+  const s = analysis.summary || {};
+  const lineCount = (analysis.parsed_mf || savedCase.parsed_mf || {}).lines?.length
+    || s.mf_line_count || 0;
+  const reqCount = (savedCase.required_docs || []).length;
+  const hasMf = !!s.has_mf;
+  const cid = savedCase.id;
+
+  const parts = [`Klart — jag har gått igenom **${escapeHtml(s.project_name || 'paketet')}**.`];
+  const facts = [];
+  if (s.file_count) facts.push(`${s.file_count} filer klassade`);
+  if (hasMf) facts.push(`mängdförteckning inläst`);
+  if (reqCount) facts.push(`${reqCount} krav att besvara`);
+  if (facts.length) parts.push(facts.join(' · ') + '.');
+
+  let cta;
+  if (hasMf) {
+    cta = `<button class="btn btn-primary btn-sm" data-route="#/kalkylator/${escapeAttr(cid)}">Nästa steg: prissätt i kalkylatorn →</button>`;
+  } else if (reqCount) {
+    cta = `<button class="btn btn-primary btn-sm" data-route="#/krav/${escapeAttr(cid)}">Nästa steg: gå igenom kraven →</button>`;
+  } else {
+    cta = `<button class="btn btn-primary btn-sm" data-route="#/anbud/edit/${escapeAttr(cid)}">Öppna anbudet →</button>`;
+  }
+
+  const el = document.createElement('div');
+  el.className = 'chat-message agent agent-summary';
+  el.innerHTML = `<div class="chat-bubble">${renderMarkdownLight(parts.join(' '))}
+    <div class="agent-summary-cta">${cta}
+      <button class="btn btn-ghost btn-sm" data-suggest-prices="${escapeAttr(cid)}">Låt agenten föreslå priser</button>
+    </div></div>`;
+  chat.appendChild(el);
+  el.querySelector('[data-suggest-prices]')?.addEventListener('click', () => {
+    location.hash = `#/kalkylator/${encodeURIComponent(cid)}`;
+    setTimeout(() => { const b = document.getElementById('mfSuggestBtn'); if (b) b.click(); }, 1200);
+  });
+  scrollChatToBottom();
 }
 
 // ---------- ANBUDSUTKAST (drafts per case) ------------------------------
@@ -2331,6 +2449,25 @@ async function renderKalkylatorForCase(caseId) {
     document.getElementById('kalkylatorMeta').innerHTML =
       `${stateChip(c)}${metaParts.length ? ' · ' + metaParts.join(' · ') : ''}` || '—';
 
+    // Fortfarande under analys → visa väntläge och auto-uppdatera
+    if (c.state === 'INTAKE' || c.state === 'EXTRACTING') {
+      document.getElementById('mfEditorPanel').hidden = true;
+      const noMf = document.getElementById('kalkylatorNoMf');
+      noMf.hidden = false;
+      noMf.innerHTML = '<p><span class="inline-spinner"></span> Anbudet analyseras fortfarande — mängdförteckning och krav dyker upp så snart det är klart.</p>'
+        + '<p class="muted small">Sidan uppdateras automatiskt.</p>';
+      clearTimeout(_kalkPoll);
+      _kalkPoll = setTimeout(() => {
+        if (location.hash.includes(`/kalkylator/${caseId}`)) renderKalkylatorForCase(caseId);
+      }, 4000);
+      // Visa ändå hero + tomma stats, sedan retur
+      document.getElementById('kalkStatTotal').textContent = '—';
+      document.getElementById('kalkStatLines').textContent = '—';
+      document.getElementById('kalkStatPriced').textContent = '—';
+      document.getElementById('kalkStatAma').textContent = '—';
+      return;
+    }
+
     _addKalkRecent(caseId, c.project_name || c.source_name);
     renderKalkylatorRecent();
 
@@ -2883,6 +3020,7 @@ async function loadCaseDetail(caseId) {
 // ---------- UE-MEJL-VYN -------------------------------------------------
 
 function renderUePage() {
+  prefillCompanyInto(document.getElementById('ueForm'));
   const ueAreasEl = document.getElementById('ueAreas');
   const suggestions = lastAnalysis?.ue_suggestions || [
     'Spont och pålning', 'Asfaltering', 'Elinstallation',

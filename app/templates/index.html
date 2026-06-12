@@ -23,7 +23,7 @@
 
       <nav class="topbar-tabs" id="topbarTabs">
         <a class="tab" data-tab="agent" data-route="#/start">Agent</a>
-        <a class="tab" data-tab="anbud" data-route="#/dashboard">Anbud</a>
+        <a class="tab" data-tab="anbud" data-route="#/bids/active">Anbud</a>
         <a class="tab" data-tab="kalkylator" data-route="#/kalkylator">Kalkylator</a>
         <a class="tab" data-tab="bibliotek" data-route="#/ama/anlaggning">Bibliotek</a>
         <a class="tab" data-tab="kunskapsbas" data-route="#/kunskapsbas">Kunskapsbas</a>
@@ -77,20 +77,10 @@
           </button>
 
           <div class="sidebar-divider"></div>
-          <p class="sidebar-label">Översikt</p>
-          <a class="sidebar-link" data-route="#/dashboard">
-            <span class="sidebar-link-icon">▦</span>
-            <span>Dashboard</span>
-          </a>
-
-          <p class="sidebar-label">Anbud</p>
-          <a class="sidebar-link" data-route="#/upload">
-            <span class="sidebar-link-icon">↑</span>
-            <span>Ladda upp MF</span>
-          </a>
+          <p class="sidebar-label">Mina anbud</p>
           <a class="sidebar-link" data-route="#/bids/active">
             <span class="sidebar-link-icon">○</span>
-            <span>Pågående utkast</span>
+            <span>Pågående</span>
           </a>
           <a class="sidebar-link" data-route="#/bids/submitted">
             <span class="sidebar-link-icon">→</span>
@@ -99,6 +89,10 @@
           <a class="sidebar-link" data-route="#/bids/archive">
             <span class="sidebar-link-icon">▣</span>
             <span>Vunna / förlorade</span>
+          </a>
+          <a class="sidebar-link" data-route="#/dashboard">
+            <span class="sidebar-link-icon">▦</span>
+            <span>Översikt</span>
           </a>
 
           <p class="sidebar-label">Dokument</p>
@@ -703,12 +697,12 @@
               <div class="panel">
                 <div class="panel-head"><h2>Värden</h2></div>
                 <form id="ueForm" class="form">
-                  <label>Projekt<input type="text" name="project_name" value="VÄG 875, GC SUNDBORN" /></label>
-                  <label>Dokumentnr<input type="text" name="document_number" value="1E12MF10" /></label>
-                  <label>Ditt företag<input type="text" name="company_name" value="Westcon Entreprenad AB" /></label>
-                  <label>Kontaktperson<input type="text" name="contact_name" value="Lars Olsson" /></label>
-                  <label>E-post<input type="email" name="contact_email" value="lars@westcon.se" /></label>
-                  <label>Telefon<input type="tel" name="contact_phone" value="070-000 00 00" /></label>
+                  <label>Projekt<input type="text" name="project_name" placeholder="Projektnamn" /></label>
+                  <label>Dokumentnr<input type="text" name="document_number" placeholder="t.ex. 1E12MF10" /></label>
+                  <label>Ditt företag<input type="text" name="company_name" placeholder="Fylls från Inställningar" /></label>
+                  <label>Kontaktperson<input type="text" name="contact_name" placeholder="Förnamn Efternamn" /></label>
+                  <label>E-post<input type="email" name="contact_email" placeholder="namn@foretag.se" /></label>
+                  <label>Telefon<input type="tel" name="contact_phone" placeholder="070-000 00 00" /></label>
                   <label>Deadline<input type="date" name="bid_due" /></label>
 
                   <div class="ue-areas-block">
@@ -939,12 +933,12 @@
               <div class="panel">
                 <div class="panel-head"><h2>Värden</h2></div>
                 <form id="tmplForm" class="form">
-                  <label>Projekt<input type="text" name="project_name" value="VÄG 875, GC SUNDBORN" /></label>
-                  <label>Dokumentnr<input type="text" name="document_number" value="1E12MF10" /></label>
-                  <label>Anbudsgivare<input type="text" name="company_name" value="Westcon Entreprenad AB" /></label>
-                  <label data-show-for="anbudssumma">Anbudssumma (kr)<input type="number" name="total_amount" value="1687336" /></label>
-                  <label data-show-for="missiv">Beställare<input type="text" name="customer_name" value="Trafikverket" /></label>
-                  <label data-show-for="sekretess">Org.nr<input type="text" name="organisationsnummer" value="556000-0000" /></label>
+                  <label>Projekt<input type="text" name="project_name" placeholder="Projektnamn" /></label>
+                  <label>Dokumentnr<input type="text" name="document_number" placeholder="t.ex. 1E12MF10" /></label>
+                  <label>Anbudsgivare<input type="text" name="company_name" placeholder="Fylls från Inställningar" /></label>
+                  <label data-show-for="anbudssumma">Anbudssumma (kr)<input type="number" name="total_amount" placeholder="0" /></label>
+                  <label data-show-for="missiv">Beställare<input type="text" name="customer_name" placeholder="Beställare" /></label>
+                  <label data-show-for="sekretess">Org.nr<input type="text" name="organisationsnummer" placeholder="556000-0000" /></label>
                   <label>Kontaktperson<input type="text" name="contact_name" placeholder="Förnamn Efternamn" /></label>
                   <label data-show-for="anbudssumma">E-post<input type="email" name="contact_email" placeholder="namn@foretag.se" /></label>
                   <label data-show-for="anbudssumma">Telefon<input type="tel" name="contact_phone" placeholder="070-000 00 00" /></label>

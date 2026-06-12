@@ -3976,3 +3976,58 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   font-size: 0.95rem;
   color: var(--jarn);
 }
+
+/* ========================================================================
+   Guidat flöde — bid-hub, mjuk bakgrundslandning, agent-sammanfattning
+   ======================================================================== */
+
+/* Nästa-steg-kolumn i bid-listan */
+.bid-row { transition: background 0.12s; }
+.bid-row.busy { opacity: 0.85; }
+.bid-next {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.bid-next-label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--lodbla);
+  white-space: nowrap;
+}
+.bid-next-arrow { color: var(--muted-2); transition: transform 0.12s; }
+.bid-row:hover .bid-next-arrow { transform: translateX(3px); color: var(--lodbla); }
+
+/* Mjuk "fortsätter i bakgrunden"-notis */
+.bg-notice {
+  background: #FBF1D8;
+  border: 1px solid var(--ockra);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 10px 0;
+}
+.bg-notice p { margin: 0 0 10px; font-size: 0.92rem; color: var(--jarn); }
+.bg-notice .btn { margin-right: 8px; }
+
+/* Agentens sammanfattning + CTA i chatten */
+.agent-summary .chat-bubble { background: var(--bg-sidebar); border-radius: var(--radius); padding: 14px 16px; }
+.agent-summary-cta {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* Inline-spinner (väntläge i kalkylatorn) */
+.inline-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--linjegra);
+  border-top-color: var(--ockra);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
