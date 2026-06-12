@@ -4366,7 +4366,7 @@ async function loadSlutfor(caseId) {
     const c = await cres.json();
     _slutforCase = c;
 
-    document.getElementById('slutforTitle').textContent = c.project_name || caseId;
+    document.getElementById('slutforTitle').textContent = c.project_name || c.source_name || caseId;
     const metaParts = [];
     if (c.document_number) metaParts.push(c.document_number);
     metaParts.push(`status: ${stateLabelOf(c.state)}`);

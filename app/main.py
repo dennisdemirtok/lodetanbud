@@ -861,7 +861,7 @@ async def api_case_krav(case_id: str) -> JSONResponse:
     return JSONResponse({
         "case_id": case_id,
         "state": case.state,
-        "project_name": case.project_name,
+        "project_name": case.project_name or case.source_name,
         "counts": counts,
         "huvuddelar": HUVUDDELAR,
         "requirements": reqs,
