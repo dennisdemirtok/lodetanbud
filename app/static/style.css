@@ -4150,3 +4150,6 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   border-radius: 5px;
   font-size: 0.85em;
 }
+
+/* Live-stegen har egna ikoner — stäng av legacy-markörerna (dubbla ✓/○) */
+.upload-progress-steps.live li::before { content: none; }
