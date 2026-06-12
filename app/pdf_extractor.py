@@ -97,6 +97,22 @@ def _clean_label_value(value: str) -> str | None:
     return v
 
 
+def _project_from_cover_page(text: str) -> str | None:
+    """Svensk FFU-framsida: projektnamnet står som egen rad strax OVANFÖR
+    'FÖRFRÅGNINGSUNDERLAG' ("Haga Entré Park och Torg\\nFÖRFRÅGNINGSUNDERLAG")."""
+    lines = [l.strip() for l in (text or "").splitlines()]
+    for i, line in enumerate(lines):
+        if re.fullmatch(r"FÖRFRÅGNINGSUNDERLAG\.?", line, re.IGNORECASE):
+            for j in range(i - 1, max(-1, i - 4), -1):
+                cand = lines[j] if j >= 0 else ""
+                if 3 <= len(cand) <= 70 and not re.search(r"\d{4}-\d{2}|@|www\.", cand):
+                    cleaned = _clean_label_value(cand)
+                    if cleaned:
+                        return cleaned
+            break
+    return None
+
+
 def sniff_metadata_from_text(text: str) -> dict:
     """Försök hitta projekt/dokument/datum från fri text."""
     found: dict = {}
@@ -104,6 +120,9 @@ def sniff_metadata_from_text(text: str) -> dict:
     if m := PROJECT_NAME_PATTERN.search(text):
         val = _clean_label_value(m.group(1))
         if val:
+            found["project_name"] = val
+    if "project_name" not in found:
+        if val := _project_from_cover_page(text):
             found["project_name"] = val
     if m := DOCUMENT_NUMBER_PATTERN.search(text):
         found["document_number"] = m.group(1).strip()

@@ -152,3 +152,9 @@ async def test_exclude_keeps_standalone_observations(tmp_path, monkeypatch):
 
     s = await pe.suggest("DCB.313", "Fyllning", "m2", exclude_case_id="case_nagot")
     assert s is not None and s["n"] == 1  # NULL-obs överlever exclude
+
+
+def test_cover_page_project_name():
+    from app.pdf_extractor import sniff_metadata_from_text
+    text = "KARLSTAD.SE\nHaga Entré Park och Torg\nFÖRFRÅGNINGSUNDERLAG\nDiarie nr: 322223\nDATUM: 2025-02-28"
+    assert sniff_metadata_from_text(text).get("project_name") == "Haga Entré Park och Torg"

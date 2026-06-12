@@ -597,7 +597,7 @@ async def api_case_review(case_id: str) -> JSONResponse:
         "case_id": case_id,
         "state": case.state,
         "state_label": case_states.LABELS.get(case.state, case.state),
-        "project_name": case.project_name,
+        "project_name": case.project_name or case.source_name,
         "thresholds": {"red": REVIEW_RED, "yellow": REVIEW_YELLOW},
         "lines": [_review_line_dict(r) for r in rows],
         "pdf_document": {
