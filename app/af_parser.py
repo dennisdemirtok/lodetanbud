@@ -194,63 +194,82 @@ REGLER:
   samma mening flera gånger med olika kind/response_format."""
 
 
+async def _extract_chunk(chunk: list[AfSection], case_id: str | None) -> list[dict]:
+    """LLM-extraktion + citatverifiering för EN chunk. Returnerar
+    requirement-dicts (utan position — sätts av anroparen)."""
+    parts = ["Sektioner ur AF-dokumentet:\n"]
+    for s in chunk:
+        parts.append(f"## {s.code} {s.title}".strip())
+        parts.append(s.text.strip()[:6000])
+        parts.append("")
+    parts.append("Extrahera kraven enligt schemat.")
+
+    parsed, _err = await llm.call_structured(
+        system=KRAV_SYSTEM,
+        prompt="\n".join(parts),
+        schema=KRAV_SCHEMA,
+        purpose="extract_af_requirements",
+        case_id=case_id,
+        max_tokens=4096,
+    )
+    if parsed is None:
+        return []
+
+    chunk_codes = {s.code for s in chunk}
+    rows: list[dict] = []
+    for raw in parsed.get("requirements") or []:
+        quote = (raw.get("quote") or "").strip()
+        if not quote:
+            continue
+        verified, ratio, page = verify_quote(quote, chunk)
+        af_code = (raw.get("af_code") or "").strip()
+        if af_code not in chunk_codes:
+            af_code = af_code or None
+        rows.append({
+            "af_code": af_code or None,
+            "kind": raw.get("kind") or "skall",
+            "text": quote,
+            "response_format": raw.get("response_format") or "fritext",
+            "deadline": (raw.get("deadline") or "").strip() or None,
+            "source": {"page": page, "verified": verified, "match_ratio": ratio},
+            "confidence": 0.0 if not verified else (0.95 if ratio >= 0.999 else 0.85),
+        })
+    return rows
+
+
 async def extract_matrix(
     pages: list[str],
     case_id: str | None = None,
 ) -> list[dict]:
     """
-    Hela kedjan: split → LLM per chunk → citatverifiering.
+    Hela kedjan: split → LLM per chunk (parallellt) → citatverifiering.
     Returnerar requirement-dicts redo för DB. Tom lista om LLM saknas.
+
+    Chunkarna körs parallellt med begränsad samtidighet — en stor AF
+    (~15 chunks) gick tidigare sekventiellt på ~6 min, nu ~30–60 s.
     """
+    import asyncio
+
     sections = split_af_sections(pages)
     if not sections or not llm.is_configured():
         return []
 
+    chunks = _chunk_sections(sections)
+    sem = asyncio.Semaphore(5)  # tak mot rate-limits
+
+    async def _guarded(chunk):
+        async with sem:
+            try:
+                return await _extract_chunk(chunk, case_id)
+            except Exception:
+                return []
+
+    results = await asyncio.gather(*[_guarded(c) for c in chunks])
+
+    # Platta + sätt position i dokumentordning (chunkarna är ordnade)
     out: list[dict] = []
-    position = 0
-
-    for chunk in _chunk_sections(sections):
-        parts = ["Sektioner ur AF-dokumentet:\n"]
-        for s in chunk:
-            parts.append(f"## {s.code} {s.title}".strip())
-            parts.append(s.text.strip()[:6000])
-            parts.append("")
-        parts.append("Extrahera kraven enligt schemat.")
-        prompt = "\n".join(parts)
-
-        parsed, _err = await llm.call_structured(
-            system=KRAV_SYSTEM,
-            prompt=prompt,
-            schema=KRAV_SCHEMA,
-            purpose="extract_af_requirements",
-            case_id=case_id,
-            max_tokens=4096,
-        )
-        if parsed is None:
-            continue
-
-        chunk_codes = {s.code for s in chunk}
-        for raw in parsed.get("requirements") or []:
-            quote = (raw.get("quote") or "").strip()
-            if not quote:
-                continue
-            verified, ratio, page = verify_quote(quote, chunk)
-            af_code = (raw.get("af_code") or "").strip()
-            if af_code not in chunk_codes:
-                # Modellen angav kod utanför chunken — behåll men utan att lita på den
-                af_code = af_code or None
-
-            out.append({
-                "af_code": af_code or None,
-                "kind": raw.get("kind") or "skall",
-                "text": quote,
-                "response_format": raw.get("response_format") or "fritext",
-                "deadline": (raw.get("deadline") or "").strip() or None,
-                "source": {"page": page, "verified": verified, "match_ratio": ratio},
-                # Citat ej verifierat → confidence 0, visas aldrig grönt
-                "confidence": 0.0 if not verified else (0.95 if ratio >= 0.999 else 0.85),
-                "position": position,
-            })
-            position += 1
-
+    for chunk_rows in results:
+        for r in chunk_rows:
+            r["position"] = len(out)
+            out.append(r)
     return out
