@@ -447,7 +447,7 @@ async def api_package_analyze(files: list[UploadFile] = File(...)) -> JSONRespon
     source_name = zip_name or _common_top_folder([p for p, _ in pairs]) or "uppladdat-paket"
 
     case_id = await _stage_package(
-        source="zip" if zip_names else ("folder" if len(pairs) > 1 else "single"),
+        source="zip" if zips else ("folder" if len(pairs) > 1 else "single"),
         source_name=source_name,
         pairs=pairs,
     )
