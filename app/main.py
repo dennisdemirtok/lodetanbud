@@ -24,6 +24,7 @@ from app import __version__
 from app import afb_templates as afb
 from app import ama_catalog
 from app import answer_generator
+from app import autopilot
 from app import case_archive
 from app import chat as lodet_chat
 from app import company_settings
@@ -1129,6 +1130,50 @@ async def api_case_overview(case_id: str) -> JSONResponse:
         "formalia": {"passed": gate["passed"], "blocking_count": gate["blocking_count"]} if gate else None,
         "busy": busy,
     })
+
+
+@app.post("/api/cases/{case_id}/autopilot")
+async def api_autopilot(case_id: str) -> JSONResponse:
+    """Driv anbudet framåt: agenten kör de säkra stegen autonomt och pausar
+    vid första checkpoint som kräver din input (UE, firmatecknare)."""
+    result = await autopilot.run(case_id)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return JSONResponse(result)
+
+
+@app.post("/api/cases/{case_id}/ue")
+async def api_save_ue(case_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Spara UE-tilldelningar (område → företag/e-post) på anbudet, och lär in
+    dem i företagsbiblioteket så de förfylls nästa gång (flywheel)."""
+    assignments = payload.get("assignments")
+    if not isinstance(assignments, dict):
+        raise HTTPException(status_code=400, detail="assignments (område → {company,email}) krävs")
+
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+        meta = dict(case.meta or {})
+        meta["ue_assignments"] = assignments
+        case.meta = meta
+        flag_modified(case, "meta")
+        await lodet_db.log_event(session, case_id, "user_edit",
+                                 {"what": "ue_assignments", "areas": list(assignments.keys())})
+        await session.commit()
+
+    # Flywheel: lär in område → företag i företagsbiblioteket
+    try:
+        settings = company_settings.get_settings()
+        lib = dict(settings.get("ue_contacts") or {})
+        for area, a in assignments.items():
+            if (a or {}).get("company"):
+                lib[area] = {"company": a["company"], "email": a.get("email") or ""}
+        company_settings.save_settings({"ue_contacts": lib})
+    except Exception:
+        pass
+
+    return JSONResponse({"ok": True, "areas": len(assignments)})
 
 
 # --- Formaliagrind + state-flöde (AP5) --------------------------------------

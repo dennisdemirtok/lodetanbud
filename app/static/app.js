@@ -617,15 +617,20 @@ async function renderOverview(caseId) {
         <div class="panel-head"><h2>Status</h2></div>
         <div class="ov-side-body">
           <p class="ov-formalia-row">${formalia}</p>
+          ${d.busy ? '' : `<button class="btn btn-primary ov-autopilot-btn" data-autopilot="${escapeAttr(caseId)}">✦ Driv anbudet framåt</button>`}
+          <p class="ov-autopilot-hint">Agenten prissätter, skriver utkast och frågar dig bara där den behöver omdöme.</p>
           <div class="ov-quick">
             <button class="btn btn-ghost btn-sm" data-route="#/kalkylator/${escapeAttr(caseId)}">Kalkylator</button>
             <button class="btn btn-ghost btn-sm" data-route="#/krav/${escapeAttr(caseId)}">Kravmatris</button>
             <button class="btn btn-ghost btn-sm" data-route="#/slutfor/${escapeAttr(caseId)}">Slutför</button>
           </div>
-          ${d.next_step ? `<button class="btn btn-primary ov-nextbtn" data-route="${escapeAttr(d.next_step.route)}">${escapeHtml(d.next_step.label)} →</button>` : ''}
         </div>
       </div>
-    </div>`;
+    </div>
+    <div id="autopilotPanel" class="panel ov-autopilot-panel" hidden></div>`;
+
+  const apBtn = el.querySelector('[data-autopilot]');
+  if (apBtn) apBtn.addEventListener('click', () => runAutopilot(caseId));
 
   // Auto-uppdatera medan analysen pågår
   clearTimeout(_overviewPoll);
@@ -634,6 +639,129 @@ async function renderOverview(caseId) {
       if (location.hash.includes(`/oversikt/${caseId}`)) renderOverview(caseId);
     }, 3500);
   }
+}
+
+// ---------- AUTOPILOT (driv anbudet framåt) ----------------------------
+
+async function runAutopilot(caseId) {
+  const panel = document.getElementById('autopilotPanel');
+  const btn = document.querySelector('[data-autopilot]');
+  if (btn) { btn.disabled = true; btn.textContent = '✦ Agenten arbetar…'; }
+  if (panel) {
+    panel.hidden = false;
+    panel.innerHTML = '<div class="panel-head"><h2>Agenten arbetar</h2></div>'
+      + '<div class="ov-ap-body"><p><span class="inline-spinner"></span> Prissätter, skriver utkast och kollar formalia…</p></div>';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  let d;
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/autopilot`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    d = await res.json();
+  } catch (e) {
+    if (panel) panel.innerHTML = `<div class="ov-ap-body"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Driv anbudet framåt'; }
+    return;
+  }
+  renderAutopilotResult(caseId, d);
+}
+
+function renderAutopilotResult(caseId, d) {
+  const panel = document.getElementById('autopilotPanel');
+  if (!panel) return;
+
+  const actions = (d.actions || []).map((a) => `
+    <li class="done"><span class="step-icon done">✓</span>
+      <span class="step-body"><span class="step-label">${escapeHtml(a.label)}</span>
+      <span class="step-detail">${escapeHtml(a.detail || '')}${a.route ? ` <button class="btn btn-ghost btn-xs" data-route="${escapeAttr(a.route)}">öppna →</button>` : ''}</span></span>
+    </li>`).join('');
+
+  let body = `<ul class="upload-progress-steps live">${actions || '<li class="done"><span class="step-body"><span class="step-detail">Inget nytt att göra automatiskt just nu.</span></span></li>'}</ul>`;
+
+  if (d.checkpoint) {
+    body += renderCheckpoint(caseId, d.checkpoint);
+  } else if (d.done) {
+    body += `<div class="ov-ap-done">🎉 ${escapeHtml(d.summary)} <button class="btn btn-primary btn-sm" data-route="#/slutfor/${escapeAttr(caseId)}">Slutför →</button></div>`;
+  } else {
+    body += `<div class="ov-ap-done">${escapeHtml(d.summary)} <button class="btn btn-ghost btn-sm" data-autopilot-again="${escapeAttr(caseId)}">Kör vidare</button></div>`;
+  }
+
+  panel.innerHTML = `<div class="panel-head"><h2>Agenten ${d.checkpoint ? 'behöver din input' : 'körde'}</h2></div><div class="ov-ap-body">${body}</div>`;
+
+  panel.querySelector('[data-autopilot-again]')?.addEventListener('click', () => runAutopilot(caseId));
+  bindCheckpoint(caseId, panel);
+  // Uppdatera nyckeltalen/progress i bakgrunden (utan att slänga autopilot-panelen)
+  refreshOverviewStats(caseId);
+}
+
+function renderCheckpoint(caseId, cp) {
+  if (cp.type === 'ue') {
+    const rows = (cp.areas || []).map((a, i) => `
+      <div class="cp-ue-row" data-area="${escapeAttr(a.area)}">
+        <span class="cp-ue-area">${escapeHtml(a.area)}</span>
+        <input class="cp-ue-company" placeholder="Underentreprenör (lämna tomt = egen regi)" value="${escapeAttr(a.company || '')}" />
+        <input class="cp-ue-email" placeholder="e-post (valfritt)" value="${escapeAttr(a.email || '')}" />
+      </div>`).join('');
+    return `<div class="cp-box"><p class="cp-title">${escapeHtml(cp.title)}</p>
+      <p class="cp-intro">${escapeHtml(cp.intro)}</p>
+      <div class="cp-ue-list">${rows}</div>
+      <button class="btn btn-primary btn-sm" data-cp-submit="ue">Spara & fortsätt →</button></div>`;
+  }
+  if (cp.type === 'company') {
+    const fields = (cp.fields || []).map((f) => `
+      <label class="cp-field">${escapeHtml(f.label)}
+        <input data-cp-key="${escapeAttr(f.key)}" value="${escapeAttr(f.value || '')}" /></label>`).join('');
+    return `<div class="cp-box"><p class="cp-title">${escapeHtml(cp.title)}</p>
+      <p class="cp-intro">${escapeHtml(cp.intro)}</p>
+      <div class="cp-company-fields">${fields}</div>
+      <button class="btn btn-primary btn-sm" data-cp-submit="company">Spara & fortsätt →</button></div>`;
+  }
+  return '';
+}
+
+function bindCheckpoint(caseId, panel) {
+  const submit = panel.querySelector('[data-cp-submit]');
+  if (!submit) return;
+  submit.addEventListener('click', async () => {
+    submit.disabled = true;
+    try {
+      if (submit.dataset.cpSubmit === 'ue') {
+        const assignments = {};
+        panel.querySelectorAll('.cp-ue-row').forEach((row) => {
+          const company = row.querySelector('.cp-ue-company').value.trim();
+          assignments[row.dataset.area] = {
+            company,
+            email: row.querySelector('.cp-ue-email').value.trim(),
+          };
+        });
+        await fetch(`/api/cases/${encodeURIComponent(caseId)}/ue`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignments }),
+        });
+      } else if (submit.dataset.cpSubmit === 'company') {
+        const payload = {};
+        panel.querySelectorAll('[data-cp-key]').forEach((inp) => { payload[inp.dataset.cpKey] = inp.value.trim(); });
+        await fetch('/api/company', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+      runAutopilot(caseId);  // fortsätt där den stannade
+    } catch (e) {
+      submit.disabled = false;
+    }
+  });
+}
+
+// Uppdatera översiktens nyckeltal/progress utan att rendera om hela vyn
+async function refreshOverviewStats(caseId) {
+  try {
+    const d = await (await fetch(`/api/cases/${encodeURIComponent(caseId)}/overview`)).json();
+    const fill = document.querySelector('.ov-progress-fill');
+    const lbl = document.querySelector('.ov-progress-label');
+    if (fill) fill.style.width = `${d.progress}%`;
+    if (lbl) lbl.textContent = `${d.progress}% klart`;
+  } catch {}
 }
 
 async function renderActiveBids() {

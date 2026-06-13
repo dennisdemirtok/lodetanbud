@@ -25,7 +25,8 @@ def client(tmp_path, monkeypatch):
     import importlib as _il
     for name in ("app.db", "app.states", "app.worker", "app.company_settings",
                  "app.case_archive", "app.formalia", "app.price_engine",
-                 "app.answer_generator", "app.agent_tools", "app.pipeline", "app.main"):
+                 "app.answer_generator", "app.agent_tools", "app.afb_templates",
+                 "app.agent", "app.autopilot", "app.pipeline", "app.main"):
         mod = _il.import_module(name)
         _il.reload(mod)
     import app.main
@@ -130,3 +131,44 @@ def test_overview_checklist(client):
     assert ov["stats"]["krav_skall"] == 1
     assert ov["next_step"] is not None
     assert 0 <= ov["progress"] <= 100
+
+
+def test_autopilot_runs_and_reports(client):
+    """Autopiloten kör säkra steg och returnerar actions/checkpoint/done utan
+    att krascha även med tomt case."""
+    import app.db as dbmod
+
+    async def _seed():
+        async with dbmod.SessionLocal() as s:
+            s.add(dbmod.Case(id="case_ap1", created_at="2026-06-13", state="CALCULATING",
+                             source="zip", source_name="Pkt", project_name="AP-projekt"))
+            await s.commit()
+
+    client.portal.call(_seed)
+    r = client.post("/api/cases/case_ap1/autopilot")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert "actions" in d and "checkpoint" in d and "done" in d
+    # Utan företagsuppgifter ifyllda → checkpoint (firmatecknare) eller formalia-rapport
+    assert d["checkpoint"] is None or d["checkpoint"]["type"] in ("ue", "company")
+
+
+def test_ue_assignment_saves_and_flywheel(client):
+    """UE-tilldelning sparas på caset OCH lärs in i företagsbiblioteket."""
+    import app.db as dbmod
+    import app.company_settings as cs
+
+    async def _seed():
+        async with dbmod.SessionLocal() as s:
+            s.add(dbmod.Case(id="case_ue1", created_at="2026-06-13", state="CALCULATING",
+                             source="zip", source_name="Pkt", project_name="UE-projekt"))
+            await s.commit()
+
+    client.portal.call(_seed)
+    r = client.post("/api/cases/case_ue1/ue", json={
+        "assignments": {"Asfaltering": {"company": "Asfalt AB", "email": "a@asfalt.se"}}
+    })
+    assert r.status_code == 200, r.text
+    # Flywheel: biblioteket lärde sig Asfaltering → Asfalt AB
+    lib = cs.get_settings().get("ue_contacts") or {}
+    assert lib.get("Asfaltering", {}).get("company") == "Asfalt AB"

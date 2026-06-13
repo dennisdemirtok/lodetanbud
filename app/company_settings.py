@@ -35,6 +35,8 @@ _DEFAULTS: dict = {
     "referensprojekt": "",        # fritext: lista över relevanta referensobjekt
     "nyckelpersoner": "",         # platschef/arbetsledare med erfarenhet
     "ue_policy": "",              # hur företaget arbetar med underentreprenörer
+    # Inlärt UE-bibliotek (flywheel): område → {company, email}. Struktur, ej sträng.
+    "ue_contacts": {},
 }
 
 
@@ -81,9 +83,14 @@ def save_settings(payload: dict) -> dict:
     """Skriv ut inställningar och returnera den uppdaterade strukturen."""
     path = _ensure_path()
     current = get_settings()
-    for key in _DEFAULTS:
-        if key in payload:
-            value = payload[key]
+    for key, default in _DEFAULTS.items():
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(default, (dict, list)):
+            # Struktur-fält (t.ex. ue_contacts) — spara som-är, stringifiera inte
+            current[key] = value if isinstance(value, type(default)) else default
+        else:
             current[key] = "" if value is None else str(value).strip()
     path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
     return current

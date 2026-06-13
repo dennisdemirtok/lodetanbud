@@ -137,6 +137,7 @@ def _case_to_dict(case: Case, docs: list[Document], lines: list[MfLine]) -> dict
         "required_docs": meta.get("required_docs") or [],
         "drafts": meta.get("drafts") or {},
         "insights": meta.get("insights") or {"observations": [], "questions": [], "vendor_templates": []},
+        "ue_assignments": meta.get("ue_assignments") or {},
         "analysis": meta.get("analysis"),
     }
 

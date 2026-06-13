@@ -4256,3 +4256,40 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   transition: color 0.12s;
 }
 .back-link:hover { color: var(--lodbla); }
+
+/* ========================================================================
+   Autopilot — "driv anbudet framåt" + checkpoint-formulär
+   ======================================================================== */
+.ov-autopilot-btn { width: 100%; }
+.ov-autopilot-hint { font-size: 0.78rem; color: var(--muted-2, #8A8378); margin: 6px 0 4px; }
+.ov-autopilot-panel { margin-top: 18px; }
+.ov-ap-body { padding: 6px 4px; }
+.ov-ap-body .upload-progress-steps.live { margin-top: 4px; }
+.ov-ap-done {
+  margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+  background: var(--bg-sidebar, #F4EFE7); font-size: 0.92rem;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.btn-xs { padding: 1px 8px; font-size: 0.76rem; line-height: 1.5; border-radius: 6px; }
+
+/* Checkpoint-box (agenten frågar dig) */
+.cp-box {
+  margin-top: 14px; padding: 16px; border: 1px solid var(--ockra);
+  border-radius: 12px; background: #FFFDF6;
+}
+.cp-title { font-weight: 700; font-size: 1rem; margin: 0 0 4px; }
+.cp-intro { font-size: 0.88rem; color: var(--jarn); margin: 0 0 14px; }
+.cp-ue-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.cp-ue-row { display: grid; grid-template-columns: 1.1fr 1.4fr 1fr; gap: 8px; align-items: center; }
+.cp-ue-area { font-weight: 600; font-size: 0.88rem; }
+.cp-ue-row input, .cp-field input {
+  padding: 7px 10px; border: 1px solid var(--linjegra, #DDD6CA);
+  border-radius: 8px; font: inherit; font-size: 0.86rem; background: #fff; width: 100%;
+}
+.cp-ue-row input:focus, .cp-field input:focus { outline: 2px solid var(--ockra); outline-offset: -1px; }
+.cp-company-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.cp-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; color: var(--muted-2, #8A8378); }
+@media (max-width: 720px) {
+  .cp-ue-row { grid-template-columns: 1fr; }
+  .cp-company-fields { grid-template-columns: 1fr; }
+}
