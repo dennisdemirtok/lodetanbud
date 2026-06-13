@@ -596,7 +596,11 @@ async function renderDocsMf() {
   const el = document.getElementById('docsMfList');
   el.innerHTML = '<div class="empty-state"><p>Laddar …</p></div>';
   try {
-    const docs = await fetchDocuments('mf');
+    const all = await fetchDocuments('mf');
+    // Radstatistiken är per CASE — visa en rad per case även om paketet har
+    // flera MF-filer (annars ser identiska totaler ut som dubbletter)
+    const seen = new Set();
+    const docs = all.filter((d) => !seen.has(d.case_id) && seen.add(d.case_id));
     if (docs.length === 0) {
       el.innerHTML = '<div class="empty-state"><p>Inga mängdförteckningar än. Ladda upp ett förfrågningsunderlag på <a href="#/start">Agent-sidan</a>.</p></div>';
       return;
@@ -649,7 +653,9 @@ async function renderHistory() {
   const el = document.getElementById('historyContent');
   el.innerHTML = '<div class="empty-state"><p>Laddar …</p></div>';
   try {
-    const docs = await fetchDocuments('mf');
+    const all = await fetchDocuments('mf');
+    const seen = new Set();
+    const docs = all.filter((d) => !seen.has(d.case_id) && seen.add(d.case_id));
     if (docs.length === 0) {
       el.innerHTML = '<div class="empty-state"><p>Tom historik. Ladda upp ett förfrågningsunderlag så dyker det upp här.</p></div>';
       return;
