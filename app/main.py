@@ -72,12 +72,23 @@ async def lifespan(_app: FastAPI):
     reset = await jobq.reset_orphans()
     if reset:
         print(f"[lodet] {reset} avbrutna jobb återställda till kön")
-    worker_task = asyncio.create_task(lodet_worker.worker_loop())
+    # Bakgrundsworkern kan stängas av i tester (LODET_DISABLE_WORKER) så att
+    # dess poll-loop inte håller DB-motorn över en reload mellan testfall.
+    worker_task = None
+    if not os.getenv("LODET_DISABLE_WORKER"):
+        worker_task = asyncio.create_task(lodet_worker.worker_loop())
     yield
-    worker_task.cancel()
+    if worker_task is not None:
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+    # Släpp DB-anslutningar vid shutdown (ren shutdown i prod; tar bort
+    # engine-teardown-racen mellan testers reload av app.db)
     try:
-        await worker_task
-    except asyncio.CancelledError:
+        await lodet_db.engine.dispose()
+    except Exception:
         pass
 
 
@@ -1185,6 +1196,26 @@ async def api_save_ue(case_id: str, payload: dict = Body(...)) -> JSONResponse:
 
 
 # --- Formaliagrind + state-flöde (AP5) --------------------------------------
+
+@app.patch("/api/cases/{case_id}")
+async def api_case_patch(case_id: str, payload: dict = Body(...)) -> JSONResponse:
+    """Redigera anbudets grundfält (projektnamn, kund, dok-nr). Auto-extraktion
+    ur tender-dokument är best-effort — användaren kan alltid rätta namnet,
+    precis som 'rename matter' i Harvey/Legora."""
+    editable = {"project_name", "customer", "document_number"}
+    updates = {k: (str(v).strip() or None) for k, v in payload.items() if k in editable}
+    if not updates:
+        raise HTTPException(status_code=400, detail=f"Inga redigerbara fält (tillåtna: {sorted(editable)})")
+    async with lodet_db.SessionLocal() as session:
+        case = await session.get(lodet_db.Case, case_id)
+        if case is None:
+            raise HTTPException(status_code=404, detail="Case hittades inte")
+        for k, v in updates.items():
+            setattr(case, k, v)
+        await lodet_db.log_event(session, case_id, "user_edit", {"what": "case_fields", "fields": list(updates)})
+        await session.commit()
+    return JSONResponse({"ok": True, **updates})
+
 
 @app.get("/api/cases/{case_id}/formalia")
 async def api_formalia(case_id: str) -> JSONResponse:

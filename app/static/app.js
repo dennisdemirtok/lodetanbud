@@ -592,7 +592,7 @@ async function renderOverview(caseId) {
   el.innerHTML = `
     <div class="page-head ov-head">
       <p class="eyebrow">Anbud${d.document_number ? ' · ' + escapeHtml(d.document_number) : ''}</p>
-      <h1>${escapeHtml(d.project_name || '—')}</h1>
+      <h1 class="ov-title">${escapeHtml(d.project_name || 'Namnlöst anbud')}<button class="ov-rename" title="Byt namn" aria-label="Byt namn på anbudet">✎</button></h1>
       <div class="ov-meta">${stateChip(d)}${deadline}${d.customer ? '<span>' + escapeHtml(d.customer) + '</span>' : ''}</div>
     </div>
 
@@ -631,6 +631,33 @@ async function renderOverview(caseId) {
 
   const apBtn = el.querySelector('[data-autopilot]');
   if (apBtn) apBtn.addEventListener('click', () => runAutopilot(caseId));
+
+  // Redigerbart projektnamn (rename matter) — klick på ✎ → inline-fält → PATCH
+  const renameBtn = el.querySelector('.ov-rename');
+  if (renameBtn) renameBtn.addEventListener('click', () => {
+    const h1 = el.querySelector('.ov-title');
+    const current = d.project_name && d.project_name !== 'Namnlöst anbud' ? d.project_name : '';
+    h1.innerHTML = `<input class="ov-title-input" value="${escapeAttr(current)}" placeholder="Projektnamn" />`;
+    const inp = h1.querySelector('input');
+    inp.focus(); inp.select();
+    const save = async () => {
+      const name = inp.value.trim();
+      if (name && name !== d.project_name) {
+        try {
+          await fetch(`/api/cases/${encodeURIComponent(caseId)}`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_name: name }),
+          });
+        } catch {}
+      }
+      renderOverview(caseId);  // rendera om med nytt namn
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') inp.blur();
+      if (e.key === 'Escape') renderOverview(caseId);
+    });
+  });
 
   // Auto-uppdatera medan analysen pågår
   clearTimeout(_overviewPoll);

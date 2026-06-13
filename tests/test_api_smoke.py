@@ -18,6 +18,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("LODET_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("LODET_DISABLE_WORKER", "1")  # ingen poll-loop som håller motorn
 
     # Reloada hela db-beroendegrafen i ordning så att db, case_archive,
     # formalia, price_engine och main alla pekar på SAMMA motor (tmp-DB).
