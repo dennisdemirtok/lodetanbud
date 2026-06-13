@@ -97,6 +97,72 @@ def _quantile_stats(prices: list[float]) -> dict:
     }
 
 
+def _spread_ratio(prices: list[float]) -> float:
+    """Hur mycket de matchande priserna spretar (max/min). DEK.21 i evalen:
+    10 kr vs 121 000 kr → 12000×. Stor spridning = AMA-koden ensam räcker inte."""
+    lo, hi = min(prices), max(prices)
+    return hi / lo if lo > 0 else float("inf")
+
+
+def _confidence(n: int, spread: float) -> str:
+    """Grön bara när flera källor OCH samstämmiga. Driver färg + om raden
+    visas som trygg eller 'granska själv' i kalkylatorn."""
+    if n < 2 or spread > 8:
+        return "low"
+    if n < 4 or spread > 3:
+        return "medium"
+    return "high"
+
+
+def _narrow_by_description(obs: list[PriceObservation], description: str,
+                           floor: float = 0.45) -> list[PriceObservation]:
+    """Bland exakt-kod-träffar: behåll dem vars beskrivning liknar postens.
+    Samma AMA-kod+enhet kan vara olika arbete (DEK.21 'montering' vs 'leverans')
+    — beskrivningen avgör vilka historiska priser som faktiskt är jämförbara."""
+    nd = (description or "").strip().lower()
+    if len(nd) < 8:
+        return obs
+    scored = []
+    for o in obs:
+        r = difflib.SequenceMatcher(None, nd, (o.description or "").strip().lower()).ratio()
+        if r >= floor:
+            scored.append((r, o))
+    scored.sort(key=lambda x: -x[0])
+    return [o for _r, o in scored] or obs  # falla tillbaka om inget liknar
+
+
+def _build_suggestion(obs: list[PriceObservation], basis: str, base_flags: list[str],
+                      description: str | None) -> dict:
+    """Slå ihop matchande observationer till ett förslag med spann, n,
+    confidence och utliggar-flagga. Smalnar av på beskrivning när exakt-kod-
+    träffarna spretar brett (utliggarskydd)."""
+    flags = list(base_flags)
+    used = obs
+
+    # Utliggarskydd: spretar exakt-kod-träffarna brett, försök avgränsa på
+    # beskrivning till den verkligt jämförbara delmängden.
+    if len(obs) >= 3 and description and _spread_ratio([o.unit_price for o in obs]) > 4:
+        narrowed = _narrow_by_description(obs, description)
+        if 2 <= len(narrowed) < len(obs):
+            used = narrowed
+            basis = f"{basis}+beskrivning"
+            flags.append("avgränsat på beskrivning")
+
+    prices = [o.unit_price for o in used]
+    spread = _spread_ratio(prices)
+    conf = _confidence(len(prices), spread)
+    if spread > 8:
+        flags.append(f"stor spridning ({spread:.0f}×) — granska och sätt själv")
+    return {
+        **_quantile_stats(prices),
+        "basis": basis,
+        "flags": flags,
+        "confidence": conf,
+        "spread_ratio": round(spread, 1) if spread != float("inf") else None,
+        "samples": [_obs_to_sample(o) for o in used[:3]],
+    }
+
+
 def _ancestor_codes(code: str) -> list[str]:
     """SBB.12 → [SBB.1, SBB]. Trimmar en siffra i taget, sedan punktdelen."""
     out: list[str] = []
@@ -199,43 +265,23 @@ async def suggest(
         if ama_code:
             obs = await _fetch_exact(session, ama_code, unit, exclude_case_id, since)
             if obs:
-                return {
-                    **_quantile_stats([o.unit_price for o in obs]),
-                    "basis": "exact",
-                    "flags": [],
-                    "samples": [_obs_to_sample(o) for o in obs[:3]],
-                }
+                return _build_suggestion(obs, "exact", [], description)
 
             # 2. Exakt kod, äldre
             obs = await _fetch_exact(session, ama_code, unit, exclude_case_id, None)
             if obs:
-                return {
-                    **_quantile_stats([o.unit_price for o in obs]),
-                    "basis": "exact_old",
-                    "flags": ["äldre än 24 mån"],
-                    "samples": [_obs_to_sample(o) for o in obs[:3]],
-                }
+                return _build_suggestion(obs, "exact_old", ["äldre än 24 mån"], description)
 
             # 3. Förälderkoder
             for parent in _ancestor_codes(ama_code):
                 obs = await _fetch_exact(session, parent, unit, exclude_case_id, None)
                 if obs:
-                    return {
-                        **_quantile_stats([o.unit_price for o in obs]),
-                        "basis": "parent",
-                        "flags": [f"närliggande kod {parent}"],
-                        "samples": [_obs_to_sample(o) for o in obs[:3]],
-                    }
+                    return _build_suggestion(obs, "parent", [f"närliggande kod {parent}"], description)
 
-        # 4. Liknande beskrivning
+        # 4. Liknande beskrivning (redan avgränsad på beskrivning → ingen ytterligare narrowing)
         obs = await _fetch_similar(session, description or "", unit, exclude_case_id)
         if obs:
-            return {
-                **_quantile_stats([o.unit_price for o in obs]),
-                "basis": "similar",
-                "flags": ["liknande rad"],
-                "samples": [_obs_to_sample(o) for o in obs[:3]],
-            }
+            return _build_suggestion(obs, "similar", ["liknande rad"], None)
 
     # 5. Ingen träff
     return None

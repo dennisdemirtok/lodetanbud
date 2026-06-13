@@ -2127,13 +2127,15 @@ const _SUGGEST_BASIS_LABELS = {
 function mfSuggestionChip(i, hasPrice) {
   const s = mfEditorState.suggestions?.[i];
   if (!s || hasPrice) return '';
+  const conf = s.confidence || 'medium';  // high=grön (lita på) · medium=gul · low=röd (granska själv)
   const titleLines = [
     `Basis: ${_SUGGEST_BASIS_LABELS[s.basis] || s.basis}${(s.flags || []).length ? ' (' + s.flags.join(', ') + ')' : ''}`,
     `Spann: ${fmtSEK.format(s.low)}–${fmtSEK.format(s.high)} kr · ${s.n} observation${s.n === 1 ? '' : 'er'}`,
+    ...(s.spread_ratio && s.spread_ratio > 8 ? [`⚠ Priserna spretar ${Math.round(s.spread_ratio)}× — granska och sätt själv`] : []),
     ...(s.samples || []).map((x) => `${x.project || '—'} (${x.observed_at}): ${fmtSEK.format(x.unit_price)} kr`),
     'Klicka för att använda förslaget',
   ];
-  return `<button type="button" class="mf-suggestion" data-suggest-index="${i}" title="${escapeAttr(titleLines.join('\n'))}">≈ ${fmtSEK.format(s.unit_price)} <span class="mf-suggestion-n">(${s.n})</span></button>`;
+  return `<button type="button" class="mf-suggestion" data-confidence="${conf}" data-suggest-index="${i}" title="${escapeAttr(titleLines.join('\n'))}">≈ ${fmtSEK.format(s.unit_price)} <span class="mf-suggestion-n">(${s.n})</span></button>`;
 }
 
 async function fetchPriceSuggestions() {

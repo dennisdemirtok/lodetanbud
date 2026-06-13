@@ -158,3 +158,33 @@ def test_cover_page_project_name():
     from app.pdf_extractor import sniff_metadata_from_text
     text = "KARLSTAD.SE\nHaga Entré Park och Torg\nFÖRFRÅGNINGSUNDERLAG\nDiarie nr: 322223\nDATUM: 2025-02-28"
     assert sniff_metadata_from_text(text).get("project_name") == "Haga Entré Park och Torg"
+
+
+# ---------- Prismotorn: utliggarskydd + confidence -------------------------
+
+def test_spread_and_confidence():
+    from app.price_engine import _spread_ratio, _confidence
+    # DEK.21-fallet: 10 kr vs 121 320 kr → enorm spridning → låg confidence
+    assert _spread_ratio([10, 121320]) > 1000
+    assert _confidence(5, _spread_ratio([10, 121320])) == "low"
+    # Samstämmig historik, flera källor → grön
+    assert _confidence(5, _spread_ratio([100, 110, 120])) == "high"
+    # Få källor eller måttlig spridning → gul
+    assert _confidence(2, 2.0) == "medium"
+    assert _confidence(1, 1.0) == "low"
+
+
+def test_narrow_by_description_picks_comparable_work():
+    """Samma kod+enhet men olika arbete: beskrivningen avgör vilka priser
+    som är jämförbara (montering vs leverans)."""
+    from types import SimpleNamespace
+    from app.price_engine import _narrow_by_description
+    obs = [
+        SimpleNamespace(unit_price=10, description="Montering av stolpe på plats"),
+        SimpleNamespace(unit_price=12, description="Montering av stolpe inkl infästning"),
+        SimpleNamespace(unit_price=121320, description="Leverans av komplett transformatorstation"),
+    ]
+    narrowed = _narrow_by_description(obs, "Montering av belysningsstolpe")
+    descs = [o.description for o in narrowed]
+    assert any("Montering" in d for d in descs)
+    assert all("transformatorstation" not in d for d in descs)  # utliggaren bortgallrad

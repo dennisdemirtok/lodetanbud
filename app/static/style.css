@@ -2603,6 +2603,21 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
 }
 .mf-suggestion-n { opacity: 0.75; }
 
+/* Confidence-färg: grön = lita på, gul = okej men kolla, röd = granska själv.
+   Default (.mf-suggestion ovan) är grön/salvia → behåll för high. */
+.mf-suggestion[data-confidence="medium"] {
+  border-color: var(--ockra);
+  background: #FBF1D8;
+  color: #8A6D1B;
+}
+.mf-suggestion[data-confidence="medium"]:hover { background: var(--ockra); color: #fff; }
+.mf-suggestion[data-confidence="low"] {
+  border-color: var(--tegel, #A3431F);
+  background: #F6E3DB;
+  color: var(--tegel, #A3431F);
+}
+.mf-suggestion[data-confidence="low"]:hover { background: var(--tegel, #A3431F); color: #fff; }
+
 .mf-amount.changed { color: var(--tegel); }
 
 .mf-row-empty {
