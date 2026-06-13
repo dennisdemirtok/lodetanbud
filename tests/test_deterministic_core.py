@@ -174,6 +174,21 @@ def test_spread_and_confidence():
     assert _confidence(1, 1.0) == "low"
 
 
+def test_classifier_handles_nfd_filenames():
+    """macOS lagrar 'ä' dekomponerat (NFD: a+◌̈). Klassificeraren måste vika
+    BÅDE NFC och NFD till 'a/o' — annars klassas en Mac-uppladdad
+    'Mängdförteckning.xlsx' som okänd och hela prisflödet faller."""
+    import unicodedata
+    from app.file_classifier import classify, _name_signal
+    nfc = "10.1 Ej prissatt mängdförteckning ÖL Katrinedal.xlsx"
+    nfd = unicodedata.normalize("NFD", nfc)
+    assert nfc != nfd  # de skiljer sig på byte-nivå
+    assert "mangdforteckning" in _name_signal(nfc)
+    assert "mangdforteckning" in _name_signal(nfd)   # regressionen
+    assert classify(nfc, b"", "").type == "mf"
+    assert classify(nfd, b"", "").type == "mf"
+
+
 def test_narrow_by_description_picks_comparable_work():
     """Samma kod+enhet men olika arbete: beskrivningen avgör vilka priser
     som är jämförbara (montering vs leverans)."""

@@ -8,6 +8,7 @@ Klassificerar via filnamn + innehållsmönster.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 
@@ -51,8 +52,13 @@ DISCIPLINE_LABELS = {
 
 
 def _name_signal(name: str) -> str:
-    """Normalisera filnamn för matchning."""
-    return name.lower().replace("ä", "a").replace("ö", "o").replace("å", "a")
+    """Normalisera filnamn för matchning. NFKD + strip av kombinerande
+    diakriter gör att BÅDE precomponerad (NFC) och macOS-dekomponerad (NFD)
+    'ä/ö/å' viker till 'a/o/a' — annars klassas t.ex. 'Mängdförteckning.xlsx'
+    från en Mac (NFD) som okänd eftersom '.replace("ä",...)' bara träffar den
+    precomponerade formen."""
+    decomposed = unicodedata.normalize("NFKD", name.lower())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
 def classify(filename: str, content: bytes | None = None, content_text: str = "") -> FileKind:
