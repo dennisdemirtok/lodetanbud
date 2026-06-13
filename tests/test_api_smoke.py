@@ -58,3 +58,35 @@ def test_mixed_zip_and_loose_files_one_case(client):
     ])
     assert r.status_code == 200, r.text
     assert r.json()["case_count"] == 1  # ETT FFU = ETT anbud
+
+
+def test_documents_endpoint_with_mf_lines(client):
+    """Dokument-vyn: doc_type=mf måste summera MfLine.total per case.
+    Hade fångat l.amount-felet (fältet heter total) — 500 i prod.
+    Seedar via TestClientens egen portal så vi delar dess event-loop."""
+    import anyio
+    import app.db as dbmod
+
+    async def _seed():
+        async with dbmod.SessionLocal() as s:
+            s.add(dbmod.Case(id="case_doc1", created_at="2026-06-13", state="CALCULATING",
+                             source="zip", source_name="Testpaket", project_name="Testprojekt"))
+            s.add(dbmod.Document(id="doc1", case_id="case_doc1", filename="MF.csv", doc_type="mf"))
+            s.add(dbmod.MfLine(id="l1", case_id="case_doc1", position=0, ama_code="DCB.313",
+                               unit="m2", quantity=100, unit_price=12, total=1200))
+            s.add(dbmod.MfLine(id="l2", case_id="case_doc1", position=1, ama_code="BCB.414",
+                               unit="m", quantity=50, unit_price=8, total=400))
+            await s.commit()
+
+    client.portal.call(_seed)  # kör på samma loop som appen
+
+    r = client.get("/api/documents?doc_type=mf")
+    assert r.status_code == 200, r.text
+    docs = r.json()["documents"]
+    mine = [d for d in docs if d["case_id"] == "case_doc1"]
+    assert len(mine) == 1
+    d = mine[0]
+    assert d["line_count"] == 2
+    assert d["total_amount_sek"] == 1600
+    assert set(d["ama_codes"]) == {"DCB.313", "BCB.414"}
+    assert d["project_name"] == "Testprojekt"

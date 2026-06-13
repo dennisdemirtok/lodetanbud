@@ -1189,7 +1189,7 @@ async def api_documents_list(doc_type: str | None = None) -> JSONResponse:
                 lines = (await session.execute(
                     sa_select(lodet_db.MfLine).where(lodet_db.MfLine.case_id == cid)
                 )).scalars().all()
-                total = sum((l.amount or 0) for l in lines if l.amount)
+                total = sum((l.total or 0) for l in lines if l.total)
                 mf_stats[cid] = {
                     "line_count": len(lines),
                     "priced": sum(1 for l in lines if l.unit_price is not None),
