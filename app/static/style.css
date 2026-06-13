@@ -4153,3 +4153,33 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
 
 /* Live-stegen har egna ikoner — stäng av legacy-markörerna (dubbla ✓/○) */
 .upload-progress-steps.live li::before { content: none; }
+
+/* ========================================================================
+   Historik — AMA-kod-filter (DB-drivet, ersätter localStorage-vyn)
+   ======================================================================== */
+.history-codes {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--linjegra, #DDD6CA);
+}
+.history-codes-label {
+  font-size: 0.85rem;
+  color: var(--muted-2, #8A8378);
+  margin-bottom: 10px;
+}
+.history-codes-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.history-code-chip {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background: var(--bg-sidebar, #F4EFE7);
+  border: 1px solid transparent;
+  color: var(--jarn);
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.history-code-chip:hover { border-color: var(--ockra); }
+.history-code-chip.active {
+  background: var(--ockra);
+  color: #fff;
+}

@@ -5,7 +5,6 @@
 const fmtSEK = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 0 });
 const fmtNum = new Intl.NumberFormat('sv-SE');
 
-const STORAGE_KEY = 'lodet:history';
 const CHATS_KEY = 'lodet:chats';
 
 // ---------- ROUTING ------------------------------------------------------
@@ -22,7 +21,7 @@ const ROUTES = {
   '#/bids/archive':       { tab: 'anbud',       view: 'bids-archive',  crumb: 'Anbud / arkiv',           handler: () => {} },
   '#/docs/mf':            { tab: 'anbud',       view: 'docs-mf',       crumb: 'Dokument / MF',           handler: renderDocsMf },
   '#/docs/afb':           { tab: 'bibliotek',   view: 'docs-afb',      crumb: 'Mallar',                  handler: renderAfbList },
-  '#/docs/drawings':      { tab: 'anbud',       view: 'docs-drawings', crumb: 'Dokument / ritningar',    handler: () => {} },
+  '#/docs/drawings':      { tab: 'anbud',       view: 'docs-drawings', crumb: 'Dokument / ritningar',    handler: renderDrawings },
   '#/ama/anlaggning':     { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / Anläggning',        handler: () => renderAma('AMA_Anläggning', 'AMA Anläggning 23') },
   '#/ama/hus':            { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / Hus',               handler: () => renderAmaPlaceholder('AMA Hus 21', 'Husbyggnadskoder läses in i nästa milstolpe.') },
   '#/ama/el':             { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / El',                handler: () => renderAmaPlaceholder('AMA El 22', 'AMA El-koder läses in i nästa milstolpe.') },
@@ -379,7 +378,6 @@ async function handleFile(file) {
     }
     const data = await res.json();
     lastParsedData = data;
-    saveToHistory(data);
     renderResults(data);
     clearStatus();
   } catch (e) {
@@ -396,7 +394,6 @@ async function loadExample() {
     const res = await fetch('/api/example');
     const data = await res.json();
     lastParsedData = data;
-    saveToHistory(data);
     renderResults(data);
     clearStatus();
   } catch (e) {
@@ -509,33 +506,6 @@ function sectionLabel(letter) {
 
 // ---------- LOCAL HISTORY ------------------------------------------------
 
-function saveToHistory(payload) {
-  try {
-    const list = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const entry = {
-      id,
-      filename: payload.filename,
-      project: payload.summary.project,
-      document_number: payload.summary.document_number,
-      total_amount_sek: payload.summary.total_amount_sek,
-      line_count: payload.summary.line_count,
-      ama_codes: payload.summary.ama_codes_used,
-      saved_at: new Date().toISOString(),
-    };
-    const filtered = list.filter((e) =>
-      !(e.document_number === entry.document_number && e.project === entry.project)
-    );
-    filtered.unshift(entry);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered.slice(0, 50)));
-  } catch (e) { console.warn(e); }
-}
-
-function loadHistory() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-  catch { return []; }
-}
-
 // Nästa steg per state — driver den guidade hubben
 function nextStepFor(state, caseId) {
   const id = encodeURIComponent(caseId || '');
@@ -615,53 +585,111 @@ async function renderActiveBids() {
   }
 }
 
-function renderDocsMf() {
-  const list = loadHistory();
-  const el = document.getElementById('docsMfList');
-  if (list.length === 0) {
-    el.innerHTML = '<div class="empty-state"><p>Inga MF parsade än.</p></div>';
-    return;
-  }
-  el.innerHTML = list.map((b) => `
-    <div class="bid-row">
-      <div>
-        <div class="bid-name">${escapeHtml(b.project || '—')}</div>
-        <div class="bid-meta">${escapeHtml(b.filename || '')}</div>
-      </div>
-      <div class="bid-amount">${b.total_amount_sek ? fmtSEK.format(b.total_amount_sek) + ' kr' : '—'}</div>
-      <div class="bid-date">${formatRelDate(b.saved_at)}</div>
-      <div></div>
-    </div>
-  `).join('');
+async function fetchDocuments(docType) {
+  const q = docType ? `?doc_type=${encodeURIComponent(docType)}` : '';
+  const res = await fetch(`/api/documents${q}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()).documents || [];
 }
 
-function renderHistory() {
-  const list = loadHistory();
-  const el = document.getElementById('historyContent');
-  if (list.length === 0) {
-    el.innerHTML = '<div class="empty-state"><p>Tom historik. Parsa något så dyker det upp här.</p></div>';
-    return;
+async function renderDocsMf() {
+  const el = document.getElementById('docsMfList');
+  el.innerHTML = '<div class="empty-state"><p>Laddar …</p></div>';
+  try {
+    const docs = await fetchDocuments('mf');
+    if (docs.length === 0) {
+      el.innerHTML = '<div class="empty-state"><p>Inga mängdförteckningar än. Ladda upp ett förfrågningsunderlag på <a href="#/start">Agent-sidan</a>.</p></div>';
+      return;
+    }
+    el.innerHTML = docs.map((d) => {
+      const stats = d.line_count != null
+        ? `${d.line_count} rader · ${d.priced || 0} prissatta`
+        : escapeHtml(d.filename || '');
+      return `
+        <div class="bid-row" data-route="#/kalkylator/${escapeAttr(d.case_id)}">
+          <div>
+            <div class="bid-name">${escapeHtml(d.project_name || '—')}</div>
+            <div class="bid-meta">${escapeHtml(d.filename || '')} · ${stats}</div>
+          </div>
+          <div class="bid-amount">${d.total_amount_sek ? fmtSEK.format(d.total_amount_sek) + ' kr' : '—'}</div>
+          <div class="bid-next"><span class="bid-next-label">Öppna kalkyl</span><span class="bid-next-arrow">→</span></div>
+          <div class="bid-date">${formatRelDate(d.created_at)}</div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
   }
-  const allCodes = [...new Set(list.flatMap((b) => b.ama_codes))].sort();
-  el.innerHTML = `
-    <div style="padding: 18px 20px; border-bottom: 1px solid #F0EBDF;">
-      <div style="font-size: 0.85rem; color: var(--muted); margin-bottom: 8px;">AMA-koder som förekommit i din historik:</div>
-      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-        ${allCodes.map((c) => `<span style="font-family: var(--font-mono); font-size: 0.82rem; background: var(--ljusgra); padding: 3px 9px; border-radius: 4px;">${escapeHtml(c)}</span>`).join('')}
-      </div>
-    </div>
-    ${list.map((b) => `
-      <div class="bid-row">
+}
+
+async function renderDrawings() {
+  const el = document.getElementById('docsDrawingsList');
+  el.innerHTML = '<div class="empty-state"><p>Laddar …</p></div>';
+  try {
+    const docs = await fetchDocuments('ritning');
+    if (docs.length === 0) {
+      el.innerHTML = '<div class="empty-state"><p>Inga ritningar i något uppladdat paket än.</p></div>';
+      return;
+    }
+    el.innerHTML = docs.map((d) => `
+      <div class="bid-row" data-route="#/anbud/edit/${escapeAttr(d.case_id)}">
         <div>
-          <div class="bid-name">${escapeHtml(b.project || '—')}</div>
-          <div class="bid-meta">${escapeHtml(b.document_number || '')} · ${b.ama_codes.length} koder</div>
+          <div class="bid-name">${escapeHtml(d.filename || '—')}</div>
+          <div class="bid-meta">${escapeHtml(d.project_name || '')}${d.label ? ' · ' + escapeHtml(d.label) : ''}</div>
         </div>
-        <div class="bid-amount">${b.total_amount_sek ? fmtSEK.format(b.total_amount_sek) + ' kr' : '—'}</div>
-        <div class="bid-date">${formatRelDate(b.saved_at)}</div>
-        <div></div>
+        <div class="bid-amount">${d.page_count ? d.page_count + ' sidor' : ''}</div>
+        <div class="bid-next"><span class="bid-next-label">Öppna anbud</span><span class="bid-next-arrow">→</span></div>
+        <div class="bid-date">${formatRelDate(d.created_at)}</div>
+      </div>`).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+async function renderHistory() {
+  const el = document.getElementById('historyContent');
+  el.innerHTML = '<div class="empty-state"><p>Laddar …</p></div>';
+  try {
+    const docs = await fetchDocuments('mf');
+    if (docs.length === 0) {
+      el.innerHTML = '<div class="empty-state"><p>Tom historik. Ladda upp ett förfrågningsunderlag så dyker det upp här.</p></div>';
+      return;
+    }
+    const allCodes = [...new Set(docs.flatMap((d) => d.ama_codes || []))].sort();
+    el.innerHTML = `
+      <div class="history-codes">
+        <div class="history-codes-label">${allCodes.length} unika AMA-koder i dina anbud — klicka för att filtrera:</div>
+        <div class="history-codes-list">
+          ${allCodes.map((c) => `<button class="history-code-chip" data-code="${escapeAttr(c)}">${escapeHtml(c)}</button>`).join('')}
+        </div>
       </div>
-    `).join('')}
-  `;
+      <div id="historyRows"></div>`;
+
+    const renderRows = (filterCode) => {
+      const rows = filterCode ? docs.filter((d) => (d.ama_codes || []).includes(filterCode)) : docs;
+      document.getElementById('historyRows').innerHTML = rows.map((d) => `
+        <div class="bid-row" data-route="#/kalkylator/${escapeAttr(d.case_id)}">
+          <div>
+            <div class="bid-name">${escapeHtml(d.project_name || '—')}</div>
+            <div class="bid-meta">${escapeHtml(d.document_number || '')}${d.document_number ? ' · ' : ''}${(d.ama_codes || []).length} koder</div>
+          </div>
+          <div class="bid-amount">${d.total_amount_sek ? fmtSEK.format(d.total_amount_sek) + ' kr' : '—'}</div>
+          <div class="bid-next"><span class="bid-next-label">Öppna kalkyl</span><span class="bid-next-arrow">→</span></div>
+          <div class="bid-date">${formatRelDate(d.created_at)}</div>
+        </div>`).join('') || '<div class="empty-state"><p>Inget anbud med den koden.</p></div>';
+    };
+    renderRows(null);
+
+    el.querySelectorAll('.history-code-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const active = chip.classList.contains('active');
+        el.querySelectorAll('.history-code-chip').forEach((c) => c.classList.remove('active'));
+        if (!active) chip.classList.add('active');
+        renderRows(active ? null : chip.dataset.code);
+      });
+    });
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
+  }
 }
 
 // ---------- AMA-BIBLIOTEK ------------------------------------------------
@@ -1126,7 +1154,6 @@ async function handlePackageFiles(files) {
     if (results.length === 1) {
       lastAnalysis = results[0].analysis;
       renderAgentResult(results[0].analysis, results[0].saved_case);
-      if (results[0].parsed_mf) saveMfToHistory(results[0].parsed_mf);
     } else {
       renderMultiAgentResult({
         multi: true,
@@ -1371,7 +1398,6 @@ async function loadDemoPackage() {
       ],
       ue_suggestions: ['Spont och pålning', 'Demontering', 'Elinstallation', 'Belysningsinstallation', 'Märkning och skyltning'],
     };
-    saveMfToHistory(ex.data);
     renderAgentResult(lastAnalysis);
     status.hidden = true;
   } catch (e) {
@@ -2882,24 +2908,6 @@ function renderMarkdownLight(text) {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\n\n+/g, '</p><p>')
     .replace(/\n/g, '<br>') + '</p>');
-}
-
-function saveMfToHistory(parsedMf) {
-  try {
-    const meta = parsedMf.metadata || {};
-    const lines = parsedMf.lines || [];
-    const fakeSummary = {
-      project: meta.project_name,
-      document_number: meta.document_number,
-      total_amount_sek: meta.total_amount_sek,
-      line_count: lines.length,
-      ama_codes_used: [...new Set(lines.map((l) => l.ama_code).filter(Boolean))],
-    };
-    saveToHistory({
-      filename: meta.document_number ? `${meta.document_number}.csv` : 'package_mf.csv',
-      summary: fakeSummary,
-    });
-  } catch (e) { console.warn(e); }
 }
 
 // ---------- KUNSKAPSBAS -------------------------------------------------

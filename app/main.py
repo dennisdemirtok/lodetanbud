@@ -1164,6 +1164,66 @@ async def api_cases_list() -> JSONResponse:
     return JSONResponse({"cases": await case_archive.list_cases_summary()})
 
 
+@app.get("/api/documents")
+async def api_documents_list(doc_type: str | None = None) -> JSONResponse:
+    """Dokument ur DB:n (ej localStorage), grupperbart per typ. doc_type=mf
+    berikas med MF-radantal + total per case. Driver Dokument-vyerna."""
+    async with lodet_db.SessionLocal() as session:
+        dq = sa_select(lodet_db.Document)
+        if doc_type:
+            dq = dq.where(lodet_db.Document.doc_type == doc_type)
+        docs = (await session.execute(dq)).scalars().all()
+
+        case_ids = {d.case_id for d in docs}
+        cases = {}
+        if case_ids:
+            crows = (await session.execute(
+                sa_select(lodet_db.Case).where(lodet_db.Case.id.in_(case_ids))
+            )).scalars().all()
+            cases = {c.id: c for c in crows}
+
+        # MF-radstatistik per case (bara när vi listar MF)
+        mf_stats: dict[str, dict] = {}
+        if doc_type == "mf" and case_ids:
+            for cid in case_ids:
+                lines = (await session.execute(
+                    sa_select(lodet_db.MfLine).where(lodet_db.MfLine.case_id == cid)
+                )).scalars().all()
+                total = sum((l.amount or 0) for l in lines if l.amount)
+                mf_stats[cid] = {
+                    "line_count": len(lines),
+                    "priced": sum(1 for l in lines if l.unit_price is not None),
+                    "total_amount_sek": round(total) or None,
+                    "ama_codes": sorted({l.ama_code for l in lines if l.ama_code}),
+                }
+
+    out = []
+    for d in docs:
+        c = cases.get(d.case_id)
+        if c is None:
+            continue  # föräldralöst dokument (case raderat) — visa inte
+        entry = {
+            "document_id": d.id,
+            "case_id": d.case_id,
+            "filename": d.filename,
+            "doc_type": d.doc_type,
+            "label": d.label,
+            "page_count": d.page_count,
+            "project_name": c.project_name or c.source_name,
+            "document_number": c.document_number,
+            "state": c.state,
+            "created_at": c.created_at,
+            "next_route": case_states.LABELS.get(c.state) and f"#/kalkylator/{d.case_id}",
+        }
+        if d.case_id in mf_stats:
+            entry.update(mf_stats[d.case_id])
+        out.append(entry)
+
+    # Nyast först
+    out.sort(key=lambda e: e.get("created_at") or "", reverse=True)
+    return JSONResponse({"documents": out})
+
+
 @app.get("/api/cases/{case_id}")
 async def api_case_get(case_id: str) -> JSONResponse:
     case = await case_archive.get_case(case_id)
