@@ -335,7 +335,10 @@ def _diff_previous(results: list[dict], suite: str) -> None:
         prev = json.loads(prev_files[-1].read_text(encoding="utf-8"))
     except Exception:
         return
-    prev_by_case = {r["case"]: r for r in prev.get("results", [])}
+    # afb-suiten har struktur-checks utan "case"-nyckel → inget att diffa
+    if not all("case" in r for r in results):
+        return
+    prev_by_case = {r["case"]: r for r in prev.get("results", []) if "case" in r}
     diffs = []
     for r in results:
         p = prev_by_case.get(r["case"])
