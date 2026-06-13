@@ -1148,10 +1148,10 @@ async function renderCompanyForm() {
         <label>Organisationsnummer<input type="text" name="organisationsnummer" placeholder="556000-0000" /></label>
       </div>
       <div class="form-row">
-        <label>Kontaktperson<input type="text" name="contact_name" placeholder="Lars Olsson" /></label>
+        <label>Kontaktperson<input type="text" name="contact_name" placeholder="Förnamn Efternamn" /></label>
       </div>
       <div class="form-row">
-        <label>E-post<input type="email" name="contact_email" placeholder="lars@westcon.se" /></label>
+        <label>E-post<input type="email" name="contact_email" placeholder="namn@foretag.se" /></label>
         <label>Telefon<input type="tel" name="contact_phone" placeholder="070-000 00 00" /></label>
       </div>
       <div class="form-row">
@@ -1174,7 +1174,7 @@ async function renderCompanyForm() {
         <label>Referensprojekt<textarea name="referensprojekt" rows="2" placeholder="Vägbelysning Rv84 (Trafikverket, 2023, 4,2 Mkr)…"></textarea></label>
       </div>
       <div class="form-row">
-        <label>Nyckelpersoner<textarea name="nyckelpersoner" rows="2" placeholder="Platschef Lars Olsson, 18 års erfarenhet av väg/anläggning…"></textarea></label>
+        <label>Nyckelpersoner<textarea name="nyckelpersoner" rows="2" placeholder="Platschef med 18 års erfarenhet av väg/anläggning…"></textarea></label>
       </div>
       <div class="form-row">
         <label>UE-policy<textarea name="ue_policy" rows="2" placeholder="Hur företaget arbetar med underentreprenörer…"></textarea></label>
@@ -2712,20 +2712,31 @@ function _addKalkRecent(caseId, projectName) {
   } catch {}
 }
 
-function renderKalkylatorRecent() {
+async function renderKalkylatorRecent() {
   const el = document.getElementById('kalkylatorRecent');
   if (!el) return;
+  let list;
+  try { list = JSON.parse(localStorage.getItem(KALK_RECENT_KEY) || '[]'); }
+  catch { list = []; }
+  if (list.length === 0) {
+    el.innerHTML = '<p class="sidebar-empty">Inga anbud öppna</p>';
+    return;
+  }
+  // Validera mot DB:n — rensa raderade case och visa aktuella (ev. omdöpta) namn
   try {
-    const list = JSON.parse(localStorage.getItem(KALK_RECENT_KEY) || '[]');
-    if (list.length === 0) {
-      el.innerHTML = '<p class="sidebar-empty">Inga anbud öppna</p>';
-      return;
-    }
-    el.innerHTML = list.map((c) => `
+    const cases = (await (await fetch('/api/cases')).json()).cases || [];
+    const byId = Object.fromEntries(cases.map((c) => [c.id, c.project_name || c.source_name || c.id]));
+    const live = list.filter((c) => byId[c.id]).map((c) => ({ ...c, name: byId[c.id] }));
+    if (live.length !== list.length) localStorage.setItem(KALK_RECENT_KEY, JSON.stringify(live));
+    if (live.length === 0) { el.innerHTML = '<p class="sidebar-empty">Inga anbud öppna</p>'; return; }
+    el.innerHTML = live.map((c) => `
       <a class="sidebar-recent-item" data-route="#/kalkylator/${encodeURIComponent(c.id)}" title="${escapeAttr(c.name)}">${escapeHtml(c.name)}</a>
     `).join('');
   } catch {
-    el.innerHTML = '<p class="sidebar-empty">Inga anbud öppna</p>';
+    // Offline/fel — visa cachad lista hellre än tom
+    el.innerHTML = list.map((c) => `
+      <a class="sidebar-recent-item" data-route="#/kalkylator/${encodeURIComponent(c.id)}" title="${escapeAttr(c.name)}">${escapeHtml(c.name)}</a>
+    `).join('');
   }
 }
 
