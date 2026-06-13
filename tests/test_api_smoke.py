@@ -134,6 +134,23 @@ def test_overview_checklist(client):
     assert 0 <= ov["progress"] <= 100
 
 
+def test_patch_renames_project(client):
+    """PATCH /api/cases/{id} byter projektnamn (rename matter)."""
+    import app.db as dbmod
+
+    async def _seed():
+        async with dbmod.SessionLocal() as s:
+            s.add(dbmod.Case(id="case_rn1", created_at="2026-06-13", state="CALCULATING",
+                             source="zip", source_name="12. Ritningar", project_name=None))
+            await s.commit()
+
+    client.portal.call(_seed)
+    r = client.patch("/api/cases/case_rn1", json={"project_name": "Viltpassage E16"})
+    assert r.status_code == 200, r.text
+    ov = client.get("/api/cases/case_rn1/overview").json()
+    assert ov["project_name"] == "Viltpassage E16"
+
+
 def test_autopilot_runs_and_reports(client):
     """Autopiloten kör säkra steg och returnerar actions/checkpoint/done utan
     att krascha även med tomt case."""
