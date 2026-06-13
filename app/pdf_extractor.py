@@ -85,14 +85,26 @@ _LABEL_WORDS = {
 }
 
 
+# Värden som ser ut som något ANNAT än ett projektnamn:
+#  - handläggar-/signatursträngar: initial + namn + ", förkortning"  (t.ex. "J Berlin, dmvb")
+#  - numrerade dokumentkategorier:  "12. Ritningar", "10 Mängdförteckning"
+_JUNK_VALUE_RE = re.compile(
+    r"^[A-ZÅÄÖ]\.?\s+\S+,\s*[a-zåäö]{2,8}$"
+    r"|^\d+[.\d]*[\s_]\S",
+)
+
+
 def _clean_label_value(value: str) -> str | None:
-    """Trimma ett extraherat värde och förkasta om det är ett etikettord."""
+    """Trimma ett extraherat värde och förkasta om det är ett etikettord,
+    en handläggarsignatur eller en numrerad dokumentkategori."""
     v = re.sub(r"\s+", " ", (value or "")).strip(" :\t")
     if not v or v.lower() in _LABEL_WORDS:
         return None
     # Förkasta om värdet börjar med ett etikettord (header-rad fångad)
     first = v.split()[0].lower().rstrip(":") if v.split() else ""
     if first in _LABEL_WORDS:
+        return None
+    if _JUNK_VALUE_RE.match(v):
         return None
     return v
 

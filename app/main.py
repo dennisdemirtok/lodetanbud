@@ -374,14 +374,22 @@ async def _stage_package(source: str, source_name: str, pairs: list[tuple[str, b
 # Generiska mappnamn som inte säger vilket PROJEKT det är
 _GENERIC_FOLDER_RE = re.compile(
     r"förfrågningsunderlag|upphandlingsdokument|bilagor|ffu|anbudshandlingar|"
-    r"dokument|underlag|handlingar", re.IGNORECASE,
+    r"dokument|underlag|handlingar|ritningar|mängdförteckning|växtförteckning|"
+    r"beskrivning", re.IGNORECASE,
 )
+# Numrerad dokumentkategori-mapp: "12. Ritningar", "10_Mängdförteckning", "03 Upphandling"
+_CATEGORY_FOLDER_RE = re.compile(r"^\d+[.\d]*[\s_]")
+
+
+def _is_category_folder(name: str) -> bool:
+    """Mappnamn som beskriver en dokumentKATEGORI, inte projektet."""
+    return bool(_GENERIC_FOLDER_RE.search(name) or _CATEGORY_FOLDER_RE.match(name))
 
 
 def _common_top_folder(paths: list[str]) -> str | None:
-    """Bästa mappnamnet ur relativa sökvägar — första ICKE-generiska
-    segmentet i den vanligaste mappkedjan ("1 Förfrågningsunderlag 2/
-    Haga Entré/…" → "Haga Entré")."""
+    """Bästa mappnamnet ur relativa sökvägar — första segmentet som beskriver
+    PROJEKTET, inte en dokumentkategori ("1 Förfrågningsunderlag 2/Haga Entré/
+    12. Ritningar/…" → "Haga Entré", aldrig "12. Ritningar")."""
     from collections import Counter
     tops = Counter()
     for p in paths:
@@ -393,18 +401,18 @@ def _common_top_folder(paths: list[str]) -> str | None:
     top, n = tops.most_common(1)[0]
     if n < max(2, len(paths) // 2):
         return None
-    if not _GENERIC_FOLDER_RE.search(top):
+    if not _is_category_folder(top):
         return top
-    # Toppen är generisk — leta första icke-generiska segment en nivå ner
+    # Toppen är en kategori-mapp — leta första icke-kategori-segment en nivå ner
     seconds = Counter()
     for p in paths:
         parts = p.replace("\\", "/").strip("/").split("/")
         if len(parts) > 2 and parts[0] == top and parts[1]:
             seconds[parts[1]] += 1
-    for seg, _cnt in seconds.most_common(3):
-        if not _GENERIC_FOLDER_RE.search(seg) and not zip_handler.is_zip_filename(seg):
+    for seg, _cnt in seconds.most_common(5):
+        if not _is_category_folder(seg) and not zip_handler.is_zip_filename(seg):
             return seg
-    return top
+    return None  # hellre fallback till "uppladdat-paket" än en kategori-mapp
 
 
 @app.post("/api/package/analyze")

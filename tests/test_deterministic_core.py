@@ -174,6 +174,18 @@ def test_spread_and_confidence():
     assert _confidence(1, 1.0) == "low"
 
 
+def test_project_name_junk_guard():
+    """Projektnamns-extraktionen ska förkasta handläggarsignaturer och
+    numrerade dokumentkategorier — men behålla riktiga projektnamn."""
+    from app.pdf_extractor import _clean_label_value
+    assert _clean_label_value("J Berlin, dmvb") is None        # signatur
+    assert _clean_label_value("12. Ritningar") is None         # kategori-mapp
+    assert _clean_label_value("10 Mängdförteckning") is None
+    assert _clean_label_value("Viltpassage E16") == "Viltpassage E16"
+    assert _clean_label_value("Skjutbana Lugnet, Falun") == "Skjutbana Lugnet, Falun"
+    assert _clean_label_value("VÄG 875 GC SUNDBORN") == "VÄG 875 GC SUNDBORN"
+
+
 def test_classifier_handles_nfd_filenames():
     """macOS lagrar 'ä' dekomponerat (NFD: a+◌̈). Klassificeraren måste vika
     BÅDE NFC och NFD till 'a/o' — annars klassas en Mac-uppladdad
