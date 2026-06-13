@@ -1021,6 +1021,116 @@ async def api_answer_insight_question(case_id: str, payload: dict = Body(...)) -
     return JSONResponse({"ok": True, "index": index})
 
 
+# --- Per-anbud översikt (cockpit) -------------------------------------------
+
+@app.get("/api/cases/{case_id}/overview")
+async def api_case_overview(case_id: str) -> JSONResponse:
+    """Cockpit för ett anbud: nyckeltal + härledd att-göra-lista + formalia.
+    Checklistan är arbetsflödet (granska→prissätt→besvara→bilagor→firma→
+    lämna in), bockas av deterministiskt ur state. Detta är både
+    'TODO efter uppladdning' och 'projektöversikt'."""
+    case = await case_archive.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case hittades inte")
+
+    parsed_mf = case.get("parsed_mf") or {}
+    lines = parsed_mf.get("lines") or []
+    priced = [l for l in lines if l.get("unit_price") is not None]
+    mf_total = (parsed_mf.get("metadata") or {}).get("total_amount_sek") or case.get("total_amount_sek")
+    low_conf = sum(1 for l in lines if (l.get("confidence") if l.get("confidence") is not None else 1.0) < 0.9)
+
+    async with lodet_db.SessionLocal() as session:
+        reqs = (await session.execute(
+            sa_select(lodet_db.Requirement).where(lodet_db.Requirement.case_id == case_id)
+        )).scalars().all()
+    skall = [r for r in reqs if r.kind == "skall"]
+    bilagor = [r for r in reqs if r.kind == "bilaga"]
+    answered = [r for r in reqs if r.status in ("answered", "na")]
+    skall_answered = [r for r in skall if r.status in ("answered", "na")]
+    drafts = case.get("drafts") or {}
+    company = company_settings.get_settings()
+
+    state = case.get("state")
+    has_mf = len(lines) > 0
+    bilaga_done = sum(1 for r in bilagor if r.status == "na"
+                      or (r.af_code and r.af_code.lower() in drafts) or r.answer_draft_id)
+
+    # Att-göra-lista (arbetsflöde). done = klart; current sätts på första ej klara.
+    checklist: list[dict] = []
+    if low_conf > 0 or state == case_states.NEEDS_REVIEW:
+        checklist.append({
+            "key": "review", "label": "Granska extraktionen",
+            "detail": f"{low_conf} rader under konfidens-tröskeln behöver bekräftas" if low_conf else "Bekräfta de extraherade raderna",
+            "done": state not in (case_states.NEEDS_REVIEW, case_states.EXTRACTING, case_states.INTAKE),
+            "route": f"#/granska/{case_id}",
+        })
+    if has_mf:
+        checklist.append({
+            "key": "price", "label": "Prissätt mängdförteckningen",
+            "detail": f"{len(priced)}/{len(lines)} rader prissatta" + (f" · {round(mf_total):,} kr".replace(",", " ") if mf_total else ""),
+            "done": len(lines) > 0 and len(priced) == len(lines),
+            "route": f"#/kalkylator/{case_id}",
+        })
+    if skall:
+        checklist.append({
+            "key": "skall", "label": "Besvara skall-kraven",
+            "detail": f"{len(skall_answered)}/{len(skall)} besvarade",
+            "done": len(skall_answered) == len(skall),
+            "route": f"#/krav/{case_id}",
+        })
+    if bilagor:
+        checklist.append({
+            "key": "bilagor", "label": "Koppla bilagor",
+            "detail": f"{bilaga_done}/{len(bilagor)} bilagekrav har dokument",
+            "done": bilaga_done == len(bilagor),
+            "route": f"#/krav/{case_id}",
+        })
+    checklist.append({
+        "key": "firma", "label": "Fyll i företag & firmatecknare",
+        "detail": f"{company.get('company_name')}" if company.get("company_name") and company.get("contact_name")
+                  else "Saknas — fyll i under Inställningar",
+        "done": bool(company.get("company_name") and company.get("contact_name")),
+        "route": "#/inst/foretag",
+    })
+    checklist.append({
+        "key": "submit", "label": "Kör formaliakontroll & lämna in",
+        "detail": "Sista kontrollen innan inlämning",
+        "done": state in (case_states.SUBMITTED, case_states.AWARDED, case_states.LOST),
+        "route": f"#/slutfor/{case_id}",
+    })
+
+    done_count = sum(1 for c in checklist if c["done"])
+    next_step = next((c for c in checklist if not c["done"]), None)
+
+    busy = state in (case_states.INTAKE, case_states.EXTRACTING)
+    gate = None if busy else await formalia.run_gate(case)
+
+    return JSONResponse({
+        "case_id": case_id,
+        "project_name": case.get("project_name") or case.get("source_name"),
+        "document_number": case.get("document_number"),
+        "customer": case.get("customer"),
+        "state": state,
+        "state_label": case_states.LABELS.get(state, state),
+        "created_at": case.get("created_at"),
+        "bid_due_at": (parsed_mf.get("metadata") or {}).get("bid_due_at") or case.get("bid_due_at"),
+        "stats": {
+            "mf_rows": len(lines),
+            "mf_priced": len(priced),
+            "mf_total_sek": round(mf_total) if mf_total else None,
+            "krav_total": len(reqs),
+            "krav_skall": len(skall),
+            "krav_answered": len(answered),
+            "file_count": len(case.get("files") or []),
+        },
+        "checklist": checklist,
+        "progress": round(100 * done_count / len(checklist)) if checklist else 0,
+        "next_step": {"label": next_step["label"], "route": next_step["route"]} if next_step else None,
+        "formalia": {"passed": gate["passed"], "blocking_count": gate["blocking_count"]} if gate else None,
+        "busy": busy,
+    })
+
+
 # --- Formaliagrind + state-flöde (AP5) --------------------------------------
 
 @app.get("/api/cases/{case_id}/formalia")

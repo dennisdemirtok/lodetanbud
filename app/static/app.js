@@ -41,11 +41,30 @@ const ROUTES = {
 function navigate() {
   const hash = location.hash || '#/start';
 
-  // Dynamisk route: #/anbud/edit/{case_id} — redirect till kalkylator
+  // Dynamisk route: #/anbud/edit/{case_id} — redirect till översikten (cockpit)
   const editMatch = hash.match(/^#\/anbud\/edit\/(.+)$/);
   if (editMatch) {
     const caseId = editMatch[1];
-    location.hash = `#/kalkylator/${caseId}`;
+    location.hash = `#/oversikt/${caseId}`;
+    return;
+  }
+
+  // Dynamisk route: #/oversikt/{case_id} — per-anbud cockpit (status + att-göra)
+  const ovMatch = hash.match(/^#\/oversikt\/(.+)$/);
+  if (ovMatch) {
+    const caseId = decodeURIComponent(ovMatch[1]);
+    document.querySelectorAll('.view').forEach((v) => v.hidden = true);
+    const viewEl = document.querySelector('[data-view="oversikt"]');
+    if (viewEl) viewEl.hidden = false;
+    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    document.querySelector('.tab[data-tab="anbud"]')?.classList.add('active');
+    document.querySelectorAll('.sidebar-section').forEach((s) => s.hidden = true);
+    const sb = document.querySelector('.sidebar-section[data-sidebar="anbud"]');
+    if (sb) sb.hidden = false;
+    document.querySelectorAll('.sidebar-link').forEach((el) => el.classList.remove('active'));
+    document.querySelectorAll('.sidebar.open').forEach((s) => s.classList.remove('open'));
+    window.scrollTo({ top: 0 });
+    renderOverview(caseId);
     return;
   }
 
@@ -525,6 +544,97 @@ function nextStepFor(state, caseId) {
 
 let _activeBidsPoll = null;
 let _kalkPoll = null;
+let _overviewPoll = null;
+
+// Per-anbud cockpit: status, nyckeltal, härledd att-göra-lista, formalia.
+async function renderOverview(caseId) {
+  const el = document.getElementById('overviewContent');
+  el.innerHTML = '<div class="empty-state"><p>Laddar översikt …</p></div>';
+  let d;
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/overview`);
+    if (!res.ok) throw new Error(res.status === 404 ? 'Anbudet hittades inte' : `HTTP ${res.status}`);
+    d = await res.json();
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><p>Fel: ${escapeHtml(e.message)}</p></div>`;
+    return;
+  }
+
+  const s = d.stats || {};
+  const deadline = d.bid_due_at
+    ? `<span class="ov-deadline">Deadline ${escapeHtml(String(d.bid_due_at).slice(0, 10))}</span>` : '';
+
+  // Att-göra-lista — första ej klara markeras som "nu"
+  let currentMarked = false;
+  const checklist = (d.checklist || []).map((c) => {
+    const isCurrent = !c.done && !currentMarked;
+    if (isCurrent) currentMarked = true;
+    const icon = c.done ? '<span class="ov-check done">✓</span>'
+      : isCurrent ? '<span class="ov-check current">→</span>'
+      : '<span class="ov-check">○</span>';
+    return `
+      <button class="ov-todo${c.done ? ' done' : ''}${isCurrent ? ' current' : ''}" data-route="${escapeAttr(c.route)}">
+        ${icon}
+        <span class="ov-todo-body">
+          <span class="ov-todo-label">${escapeHtml(c.label)}</span>
+          <span class="ov-todo-detail">${escapeHtml(c.detail || '')}</span>
+        </span>
+        <span class="ov-todo-arrow">${c.done ? '' : '→'}</span>
+      </button>`;
+  }).join('');
+
+  const formalia = d.formalia
+    ? (d.formalia.passed
+        ? '<span class="ov-formalia pass">✓ Formalia klar — redo att lämna in</span>'
+        : `<span class="ov-formalia fail">${d.formalia.blocking_count} punkter blockerar inlämning</span>`)
+    : '<span class="ov-formalia muted">Analyseras …</span>';
+
+  el.innerHTML = `
+    <div class="page-head ov-head">
+      <p class="eyebrow">Anbud${d.document_number ? ' · ' + escapeHtml(d.document_number) : ''}</p>
+      <h1>${escapeHtml(d.project_name || '—')}</h1>
+      <div class="ov-meta">${stateChip(d)}${deadline}${d.customer ? '<span>' + escapeHtml(d.customer) + '</span>' : ''}</div>
+    </div>
+
+    <div class="ov-progress-wrap">
+      <div class="ov-progress-bar"><div class="ov-progress-fill" style="width:${d.progress}%"></div></div>
+      <span class="ov-progress-label">${d.progress}% klart</span>
+    </div>
+
+    <div class="card-grid stat-grid ov-stats">
+      <div class="stat-card"><span class="stat-label">Mängdförteckning</span><span class="stat-value">${s.mf_priced ?? 0}/${s.mf_rows ?? 0}</span><span class="stat-sub">rader prissatta</span></div>
+      <div class="stat-card"><span class="stat-label">Anbudssumma</span><span class="stat-value">${s.mf_total_sek ? fmtSEK.format(s.mf_total_sek) : '—'}</span><span class="stat-sub">kr exkl. moms</span></div>
+      <div class="stat-card"><span class="stat-label">Skall-krav</span><span class="stat-value">${s.krav_answered ?? 0}/${s.krav_skall ?? 0}</span><span class="stat-sub">besvarade</span></div>
+      <div class="stat-card"><span class="stat-label">Filer</span><span class="stat-value">${s.file_count ?? 0}</span><span class="stat-sub">i paketet</span></div>
+    </div>
+
+    <div class="two-col ov-cols">
+      <div class="panel ov-todo-panel">
+        <div class="panel-head"><h2>Att göra</h2>${d.next_step ? `<span class="muted small">Nästa: ${escapeHtml(d.next_step.label)}</span>` : '<span class="muted small">Klart 🎉</span>'}</div>
+        <div class="ov-todo-list">${checklist || '<div class="empty-state"><p>Anbudet analyseras …</p></div>'}</div>
+      </div>
+      <div class="panel ov-side">
+        <div class="panel-head"><h2>Status</h2></div>
+        <div class="ov-side-body">
+          <p class="ov-formalia-row">${formalia}</p>
+          <div class="ov-quick">
+            <button class="btn btn-ghost btn-sm" data-route="#/kalkylator/${escapeAttr(caseId)}">Kalkylator</button>
+            <button class="btn btn-ghost btn-sm" data-route="#/krav/${escapeAttr(caseId)}">Kravmatris</button>
+            <button class="btn btn-ghost btn-sm" data-route="#/slutfor/${escapeAttr(caseId)}">Slutför</button>
+          </div>
+          ${d.next_step ? `<button class="btn btn-primary ov-nextbtn" data-route="${escapeAttr(d.next_step.route)}">${escapeHtml(d.next_step.label)} →</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+
+  // Auto-uppdatera medan analysen pågår
+  clearTimeout(_overviewPoll);
+  if (d.busy) {
+    _overviewPoll = setTimeout(() => {
+      if (location.hash.includes(`/oversikt/${caseId}`)) renderOverview(caseId);
+    }, 3500);
+  }
+}
 
 async function renderActiveBids() {
   const el = document.getElementById('localBidsList');
@@ -560,10 +670,10 @@ async function renderActiveBids() {
       `;
     }).join('');
 
-    const routeById = Object.fromEntries(cases.map((c) => [c.id, nextStepFor(c.state, c.id).route]));
+    // Klick på ett anbud → cockpit-översikten (visar nästa steg + att-göra)
     el.querySelectorAll('.bid-row').forEach((row) => {
       row.addEventListener('click', () => {
-        location.hash = routeById[row.dataset.caseId] || `#/anbud/edit/${encodeURIComponent(row.dataset.caseId)}`;
+        location.hash = `#/oversikt/${encodeURIComponent(row.dataset.caseId)}`;
       });
     });
 
@@ -1505,14 +1615,8 @@ function postAgentSummary(analysis, savedCase) {
   if (reqCount) facts.push(`${reqCount} krav att besvara`);
   if (facts.length) parts.push(facts.join(' · ') + '.');
 
-  let cta;
-  if (hasMf) {
-    cta = `<button class="btn btn-primary btn-sm" data-route="#/kalkylator/${escapeAttr(cid)}">Nästa steg: prissätt i kalkylatorn →</button>`;
-  } else if (reqCount) {
-    cta = `<button class="btn btn-primary btn-sm" data-route="#/krav/${escapeAttr(cid)}">Nästa steg: gå igenom kraven →</button>`;
-  } else {
-    cta = `<button class="btn btn-primary btn-sm" data-route="#/anbud/edit/${escapeAttr(cid)}">Öppna anbudet →</button>`;
-  }
+  parts.push('Öppna översikten så ser du allt som ska göras steg för steg.');
+  const cta = `<button class="btn btn-primary btn-sm" data-route="#/oversikt/${escapeAttr(cid)}">Öppna översikten →</button>`;
 
   const el = document.createElement('div');
   el.className = 'chat-message agent agent-summary';
@@ -2478,6 +2582,8 @@ async function renderKalkylatorForCase(caseId) {
     const c = await res.json();
     _kalkCurrentCase = c;
 
+    const _backBtn = document.getElementById('kalkylatorBackBtn');
+    if (_backBtn) _backBtn.onclick = () => { location.hash = `#/oversikt/${encodeURIComponent(caseId)}`; };
     document.getElementById('kalkylatorProjectName').textContent = c.project_name || c.source_name || c.id;
     const metaParts = [];
     if (c.document_number) metaParts.push(escapeHtml(c.document_number));
@@ -2550,7 +2656,9 @@ async function renderKalkylatorForCase(caseId) {
       }
     });
 
-    // "Öppna i Agent"-knapp + kravmatris
+    // Tillbaka till cockpit-översikten + "Öppna i Agent" + kravmatris
+    const backBtn = document.getElementById('kalkylatorBackBtn');
+    if (backBtn) backBtn.onclick = () => { location.hash = `#/oversikt/${encodeURIComponent(caseId)}`; };
     document.getElementById('kalkylatorAgentBtn').onclick = () => { location.hash = '#/start'; };
     const kravBtn = document.getElementById('kalkylatorKravBtn');
     if (kravBtn) kravBtn.onclick = () => { location.hash = `#/krav/${encodeURIComponent(caseId)}`; };

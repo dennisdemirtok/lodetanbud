@@ -4183,3 +4183,61 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   background: var(--ockra);
   color: #fff;
 }
+
+/* ========================================================================
+   Per-anbud översikt (cockpit) — status, nyckeltal, att-göra-lista
+   ======================================================================== */
+.ov-head { margin-bottom: 16px; }
+.ov-meta { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; color: var(--muted-2, #8A8378); font-size: 0.9rem; }
+.ov-deadline { font-weight: 500; }
+
+.ov-progress-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.ov-progress-bar { flex: 1; height: 8px; background: var(--linjegra, #DDD6CA); border-radius: 4px; overflow: hidden; }
+.ov-progress-fill { height: 100%; background: linear-gradient(90deg, var(--ockra), #C9962E); border-radius: 4px; transition: width 0.4s ease; }
+.ov-progress-label { font-size: 0.85rem; font-weight: 600; color: var(--jarn); white-space: nowrap; }
+
+.ov-stats { margin-bottom: 20px; }
+.ov-stats .stat-card { display: flex; flex-direction: column; gap: 2px; }
+.stat-sub { font-size: 0.76rem; color: var(--muted-2, #8A8378); }
+
+.ov-cols { align-items: start; }
+.ov-todo-list { display: flex; flex-direction: column; }
+.ov-todo {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; text-align: left; background: none; border: none;
+  padding: 14px 6px; border-bottom: 1px solid var(--linjegra, #EDE7DB);
+  cursor: pointer; font: inherit; transition: background 0.12s;
+}
+.ov-todo:last-child { border-bottom: none; }
+.ov-todo:hover { background: var(--bg-sidebar, #F4EFE7); }
+.ov-todo.done { opacity: 0.6; }
+.ov-todo.current { background: #FBF4E2; border-radius: 8px; }
+.ov-check { flex: 0 0 22px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.8rem; color: var(--muted-2, #8A8378); border: 1.5px solid var(--linjegra, #DDD6CA); }
+.ov-check.done { background: #3F6212; color: #fff; border-color: #3F6212; }
+.ov-check.current { background: var(--ockra); color: #fff; border-color: var(--ockra); font-weight: 700; }
+.ov-todo-body { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ov-todo-label { font-weight: 600; font-size: 0.94rem; }
+.ov-todo.done .ov-todo-label { font-weight: 500; text-decoration: line-through; }
+.ov-todo-detail { font-size: 0.82rem; color: var(--muted-2, #8A8378); }
+.ov-todo-arrow { color: var(--muted-2, #8A8378); transition: transform 0.12s; }
+.ov-todo:hover .ov-todo-arrow { transform: translateX(3px); color: var(--lodbla); }
+
+.ov-side-body { display: flex; flex-direction: column; gap: 14px; padding: 4px 2px; }
+.ov-formalia-row { margin: 0; }
+.ov-formalia { font-size: 0.9rem; font-weight: 500; }
+.ov-formalia.pass { color: #3F6212; }
+.ov-formalia.fail { color: var(--tegel, #A3431F); }
+.ov-formalia.muted { color: var(--muted-2, #8A8378); }
+.ov-quick { display: flex; gap: 8px; flex-wrap: wrap; }
+.ov-nextbtn { width: 100%; margin-top: 4px; }
+
+/* Tillbaka-länk (kalkylator → översikt) */
+.back-link {
+  display: inline-block;
+  font-size: 0.82rem;
+  color: var(--muted-2, #8A8378);
+  cursor: pointer;
+  margin-bottom: 6px;
+  transition: color 0.12s;
+}
+.back-link:hover { color: var(--lodbla); }

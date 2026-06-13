@@ -19,10 +19,16 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    import app.db
-    importlib.reload(app.db)
+    # Reloada hela db-beroendegrafen i ordning så att db, case_archive,
+    # formalia, price_engine och main alla pekar på SAMMA motor (tmp-DB).
+    # Annars skriver seed till en motor och endpointen läser från en annan.
+    import importlib as _il
+    for name in ("app.db", "app.states", "app.worker", "app.company_settings",
+                 "app.case_archive", "app.formalia", "app.price_engine",
+                 "app.answer_generator", "app.agent_tools", "app.pipeline", "app.main"):
+        mod = _il.import_module(name)
+        _il.reload(mod)
     import app.main
-    importlib.reload(app.main)
 
     from fastapi.testclient import TestClient
     # TestClient kör lifespan (init_db + worker) via context manager
@@ -90,3 +96,37 @@ def test_documents_endpoint_with_mf_lines(client):
     assert d["total_amount_sek"] == 1600
     assert set(d["ama_codes"]) == {"DCB.313", "BCB.414"}
     assert d["project_name"] == "Testprojekt"
+
+
+def test_overview_checklist(client):
+    """Cockpit-översikten: checklista bockas av ur state, progress räknas,
+    next_step pekar på första ej klara. En MF-rad oprissatt → prissätt ej klar."""
+    import app.db as dbmod
+
+    async def _seed():
+        async with dbmod.SessionLocal() as s:
+            s.add(dbmod.Case(id="case_ov1", created_at="2026-06-13", state="CALCULATING",
+                             source="zip", source_name="Pkt", project_name="Övprojekt",
+                             total_amount_sek=1600))
+            # parsed_mf på meta så get_case returnerar det
+            s.add(dbmod.MfLine(id="o1", case_id="case_ov1", position=0, ama_code="DCB.313",
+                               unit="m2", quantity=100, unit_price=12, total=1200))
+            s.add(dbmod.MfLine(id="o2", case_id="case_ov1", position=1, ama_code="BCB.414",
+                               unit="m", quantity=50, unit_price=None, total=None))
+            s.add(dbmod.Requirement(id="r1", case_id="case_ov1", position=0, kind="skall",
+                                    text="A skall lämna intyg", status="unanswered"))
+            await s.commit()
+
+    client.portal.call(_seed)
+    r = client.get("/api/cases/case_ov1/overview")
+    assert r.status_code == 200, r.text
+    ov = r.json()
+    keys = {c["key"]: c for c in ov["checklist"]}
+    # firma + submit alltid med; skall finns; price finns bara om parsed_mf har rader
+    assert "skall" in keys and keys["skall"]["done"] is False
+    assert keys["skall"]["detail"].startswith("0/1")
+    assert "firma" in keys and keys["firma"]["done"] is False
+    assert "submit" in keys
+    assert ov["stats"]["krav_skall"] == 1
+    assert ov["next_step"] is not None
+    assert 0 <= ov["progress"] <= 100
