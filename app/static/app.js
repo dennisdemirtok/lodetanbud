@@ -17,14 +17,14 @@ const ROUTES = {
   '#/dashboard':          { tab: 'anbud',       view: 'dashboard',     crumb: 'Översikt',                handler: renderDashboard },
   '#/upload':             { tab: 'anbud',       view: 'upload',        crumb: 'Anbud / nytt',            handler: renderUpload },
   '#/bids/active':        { tab: 'anbud',       view: 'bids-active',   crumb: 'Anbud / pågående',        handler: renderActiveBids },
-  '#/bids/submitted':     { tab: 'anbud',       view: 'bids-submitted',crumb: 'Anbud / inlämnade',       handler: () => {} },
-  '#/bids/archive':       { tab: 'anbud',       view: 'bids-archive',  crumb: 'Anbud / arkiv',           handler: () => {} },
+  '#/bids/submitted':     { tab: 'anbud',       view: 'bids-submitted',crumb: 'Anbud / inlämnade',       handler: renderSubmittedBids },
+  '#/bids/archive':       { tab: 'anbud',       view: 'bids-archive',  crumb: 'Anbud / arkiv',           handler: renderArchiveBids },
   '#/docs/mf':            { tab: 'anbud',       view: 'docs-mf',       crumb: 'Dokument / MF',           handler: renderDocsMf },
   '#/docs/afb':           { tab: 'bibliotek',   view: 'docs-afb',      crumb: 'Mallar',                  handler: renderAfbList },
   '#/docs/drawings':      { tab: 'anbud',       view: 'docs-drawings', crumb: 'Dokument / ritningar',    handler: renderDrawings },
   '#/ama/anlaggning':     { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / Anläggning',        handler: () => renderAma('AMA_Anläggning', 'AMA Anläggning 23') },
-  '#/ama/hus':            { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / Hus',               handler: () => renderAmaPlaceholder('AMA Hus 21', 'Husbyggnadskoder läses in i nästa milstolpe.') },
-  '#/ama/el':             { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / El',                handler: () => renderAmaPlaceholder('AMA El 22', 'AMA El-koder läses in i nästa milstolpe.') },
+  '#/ama/hus':            { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / Hus',               handler: () => renderAmaPlaceholder('AMA Hus 21', 'Husbyggnadskoder läses in inom kort.') },
+  '#/ama/el':             { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / El',                handler: () => renderAmaPlaceholder('AMA El 22', 'AMA El-koder läses in inom kort.') },
   '#/ama/af':             { tab: 'bibliotek',   view: 'ama',           crumb: 'AMA / AF',                handler: () => renderAma('AF_AMA', 'AF AMA 21') },
   '#/mallar/anbudssumma': { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / AFB.31',         handler: () => renderTemplate('anbudssumma') },
   '#/mallar/ue-lista':    { tab: 'bibliotek',   view: 'template',      crumb: 'Mallar / AFB.32',         handler: () => renderTemplate('ue-lista') },
@@ -35,7 +35,7 @@ const ROUTES = {
   '#/inst/resurser':      { tab: 'inst',        view: 'inst',          crumb: 'Inst / Resurser',         handler: renderResourcesView },
   '#/inst/index':         { tab: 'inst',        view: 'inst',          crumb: 'Inst / Index',            handler: () => renderInst('Indexserier', 'E84 per litt och KPI för indexjustering av historiska priser.') },
   '#/inst/paslag':        { tab: 'inst',        view: 'inst',          crumb: 'Inst / Påslag',           handler: () => renderInst('Påslag och marginaler', 'Standardpåslag per kategori + täckningsbidragsregler.') },
-  '#/inst/anvandare':     { tab: 'inst',        view: 'inst',          crumb: 'Inst / Användare',        handler: () => renderInst('Användare', 'Roller och behörigheter. Multi-user kommer med Supabase-integration.') },
+  '#/inst/anvandare':     { tab: 'inst',        view: 'inst',          crumb: 'Inst / Användare',        handler: () => renderInst('Användare', 'Roller och behörigheter för flera användare.') },
 };
 
 function navigate() {
@@ -406,7 +406,7 @@ async function handleFile(file) {
 }
 
 async function loadExample() {
-  showStatus('Hämtar Westcon-demo …', 'loading');
+  showStatus('Hämtar exempel …', 'loading');
   lastUploadedFile = null;
   lastWasExample = true;
   try {
@@ -791,18 +791,35 @@ async function refreshOverviewStats(caseId) {
   } catch {}
 }
 
+// Statusgrupper för de tre bid-vyerna
+const _ACTIVE_STATES = new Set(['INTAKE', 'EXTRACTING', 'NEEDS_REVIEW', 'CALCULATING', 'DRAFTING', 'FORMALIA_CHECK', 'READY']);
+const _SUBMITTED_STATES = new Set(['SUBMITTED']);
+const _ARCHIVE_STATES = new Set(['AWARDED', 'LOST']);
+
 async function renderActiveBids() {
-  const el = document.getElementById('localBidsList');
+  return renderBidList('localBidsList', _ACTIVE_STATES,
+    'Inga anbud än. Ladda upp ett förfrågningsunderlag på <a href="#/start">Agent-sidan</a>.', true);
+}
+async function renderSubmittedBids() {
+  return renderBidList('submittedBidsList', _SUBMITTED_STATES, 'Inga inlämnade anbud än.', false);
+}
+async function renderArchiveBids() {
+  return renderBidList('archiveBidsList', _ARCHIVE_STATES, 'Inga vunna eller förlorade anbud än.', false);
+}
+
+async function renderBidList(elId, states, emptyMsg, poll) {
+  const el = document.getElementById(elId);
+  if (!el) return;
   el.innerHTML = '<div class="empty-state"><p>Laddar anbud …</p></div>';
 
   try {
     const res = await fetch('/api/cases');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
-    const cases = d.cases || [];
+    const cases = (d.cases || []).filter((c) => states.has(c.state));
 
     if (cases.length === 0) {
-      el.innerHTML = '<div class="empty-state"><p>Inga anbud än. Ladda upp ett förfrågningsunderlag på <a href="#/start">Agent-sidan</a>.</p></div>';
+      el.innerHTML = `<div class="empty-state"><p>${emptyMsg}</p></div>`;
       return;
     }
 
@@ -833,7 +850,7 @@ async function renderActiveBids() {
     });
 
     // Auto-uppdatera om något anbud fortfarande analyseras
-    if (cases.some((c) => c.state === 'INTAKE' || c.state === 'EXTRACTING')) {
+    if (poll && cases.some((c) => c.state === 'INTAKE' || c.state === 'EXTRACTING')) {
       clearTimeout(_activeBidsPoll);
       _activeBidsPoll = setTimeout(() => {
         if (location.hash.startsWith('#/bids/active')) renderActiveBids();
@@ -1009,7 +1026,7 @@ function renderAmaPlaceholder(title, msg) {
   document.getElementById('amaPanelTitle').textContent = 'Sektioner';
   document.getElementById('amaCount').textContent = '—';
   document.getElementById('amaContent').innerHTML =
-    `<div class="empty-state"><p>${escapeHtml(msg)}</p><p class="muted">Roadmap dag 15–35 enligt teknisk spec v0.2.</p></div>`;
+    `<div class="empty-state"><p>${escapeHtml(msg)}</p><p class="muted">AMA Anläggning 23 finns inläst — välj den i menyn så länge.</p></div>`;
 }
 
 // ---------- AFB-MALLAR ---------------------------------------------------
@@ -1110,10 +1127,10 @@ function renderInst(title, desc) {
   document.getElementById('instDesc').textContent = desc;
   // Återställ instContent till platshållare när man lämnar företagsformuläret
   const content = document.getElementById('instContent');
-  if (content && !content.classList.contains('empty-state')) {
+  if (content) {
     content.className = 'empty-state';
-    content.innerHTML = '<p>Konfiguration sparas mot Supabase per tenant — kommer i nästa milstolpe.</p>'
-      + '<p class="muted">Se teknisk spec v0.2 avsnitt C.2 (datamodell) för planerade fält.</p>';
+    content.innerHTML = '<p>Den här inställningen kommer snart.</p>'
+      + '<p class="muted">Fyll i Företagsinfo och Resursbibliotek så länge — det är det som driver kalkylen och AFB-svaren.</p>';
   }
 }
 
@@ -1127,7 +1144,7 @@ async function renderCompanyForm() {
   content.innerHTML = `
     <form class="form company-form" id="companyForm" autocomplete="off">
       <div class="form-row">
-        <label>Företagsnamn<input type="text" name="company_name" placeholder="Westcon Entreprenad AB" required /></label>
+        <label>Företagsnamn<input type="text" name="company_name" placeholder="Ditt företag AB" required /></label>
         <label>Organisationsnummer<input type="text" name="organisationsnummer" placeholder="556000-0000" /></label>
       </div>
       <div class="form-row">
@@ -1646,7 +1663,7 @@ async function loadDemoPackage() {
   const status = document.getElementById('agentStatus');
   status.hidden = false;
   status.className = 'status loading';
-  status.textContent = 'Hämtar Westcon-demo …';
+  status.textContent = 'Hämtar exempel …';
 
   try {
     const csvRes = await fetch('/api/example');

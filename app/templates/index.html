@@ -315,7 +315,7 @@
                     &nbsp;eller&nbsp;
                     <button type="button" class="link-btn" id="folderBrowseBtn">hela mappar</button>
                     &nbsp;·&nbsp;
-                    <button type="button" class="link-btn" id="demoPackageBtn">prova med Westcon-paket</button>
+                    <button type="button" class="link-btn" id="demoPackageBtn">prova med exempel</button>
                   </p>
                 </div>
               </div>
@@ -781,7 +781,7 @@
               </div>
             </div>
             <div class="actions-row">
-              <button type="button" class="btn btn-ghost" id="exampleBtn">Prova med Westcon-demo</button>
+              <button type="button" class="btn btn-ghost" id="exampleBtn">Prova med exempel</button>
             </div>
             <div id="status" class="status" hidden></div>
 
@@ -849,10 +849,11 @@
             <div class="page-head">
               <p class="eyebrow">Anbud</p>
               <h1>Inlämnade</h1>
+              <p class="lede">Anbud som lämnats in. Registrera utfall (vunnet/förlorat) när beslut kommer.</p>
             </div>
-            <div class="empty-state">
-              <p>Inga inlämnade anbud lagras än — Supabase-integration kommer i nästa milstolpe.</p>
-              <p class="muted">Roadmap: dag 36–60 enligt teknisk spec v0.2.</p>
+            <div class="panel">
+              <div class="panel-head"><h2>Inlämnade anbud</h2></div>
+              <div id="submittedBidsList" class="bid-list"></div>
             </div>
           </section>
 
@@ -860,10 +861,11 @@
             <div class="page-head">
               <p class="eyebrow">Anbud</p>
               <h1>Vunna / förlorade</h1>
+              <p class="lede">Avgjorda anbud. Vunna affärer matar prishistoriken som förbättrar framtida kalkyler.</p>
             </div>
-            <div class="empty-state">
-              <p>Arkiv visas när historisk data importerats vid pilot-onboarding.</p>
-              <p class="muted">Onboardingflöde: vecka 1 enligt spec H.2.</p>
+            <div class="panel">
+              <div class="panel-head"><h2>Avgjorda anbud</h2></div>
+              <div id="archiveBidsList" class="bid-list"></div>
             </div>
           </section>
 
@@ -1028,8 +1030,8 @@
               <p class="lede" id="instDesc">—</p>
             </div>
             <div class="empty-state" id="instContent">
-              <p>Konfiguration sparas mot Supabase per tenant — kommer i nästa milstolpe.</p>
-              <p class="muted">Se teknisk spec v0.2 avsnitt C.2 (datamodell) för planerade fält.</p>
+              <p>Den här inställningen kommer snart.</p>
+              <p class="muted">Fyll i Företagsinfo och Resursbibliotek så länge — det är det som driver kalkylen och AFB-svaren.</p>
             </div>
           </section>
 
