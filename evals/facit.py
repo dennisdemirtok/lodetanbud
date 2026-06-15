@@ -78,8 +78,9 @@ def run() -> list[dict]:
         facit_by_case[case_dir.name] = posts
         for p in posts:
             if p.get("unit_price", 0) > 0:
+                qty = p["total_netto"] / p["unit_price"] if p.get("total_netto") else None
                 by_key.setdefault((_norm_code(p["ama_code"]), p.get("unit")), []).append(
-                    (case_dir.name, p["unit_price"]))
+                    (case_dir.name, p["unit_price"], qty))
 
     results = []
     for case_dir in sorted(GOLDEN.iterdir()):
@@ -105,17 +106,32 @@ def run() -> list[dict]:
         # Prisprediktion (leave-one-out, enhetsmatchad) vs facit-netto
         errs = []
         tot_pred = tot_act = 0.0
+        safe_pred = safe_act = 0.0   # bara prediktioner motorn visar som trygga (ej röda)
         for p in facit:
             if p.get("unit_price", 0) <= 0 or not p.get("total_netto"):
                 continue
-            others = [pr for (c, pr) in by_key.get((_norm_code(p["ama_code"]), p.get("unit")), []) if c != case]
+            qty = p["total_netto"] / p["unit_price"]
+            cands = [(pr, q) for (c, pr, q) in by_key.get((_norm_code(p["ama_code"]), p.get("unit")), []) if c != case]
+            # Mängd-skala-grind (speglar prismotorn): klumpsumma ≠ per-styck
+            comparable = True
+            if qty > 0:
+                scaled = [(pr, q) for (pr, q) in cands if q is None or qty / 10 <= q <= qty * 10]
+                if len(scaled) >= 2:
+                    cands = scaled
+                elif not scaled:
+                    comparable = False  # ingen jämförbar mängdskala → ej trygg
+            others = [pr for (pr, q) in cands]
             if not others:
                 continue
             pred = statistics.median(others)
             errs.append(abs(pred - p["unit_price"]) / p["unit_price"])
-            qty = p["total_netto"] / p["unit_price"]
             tot_pred += pred * qty
             tot_act += p["total_netto"]
+            # "Trygg" = jämförbar skala OCH samstämmig spridning (motorns gröna/gula)
+            spread = (max(others) / min(others)) if min(others) > 0 else float("inf")
+            if comparable and len(others) >= 2 and spread <= 8:
+                safe_pred += pred * qty
+                safe_act += p["total_netto"]
 
         results.append({
             "case": case,
@@ -130,6 +146,8 @@ def run() -> list[dict]:
             "total_facit": round(tot_act) if tot_act else None,
             "total_predikterat": round(tot_pred) if tot_pred else None,
             "total_avvik_pct": round(100 * (tot_pred - tot_act) / tot_act) if tot_act else None,
+            "total_avvik_sakra_pct": round(100 * (safe_pred - safe_act) / safe_act) if safe_act else None,
+            "sakra_andel_pct": round(100 * safe_act / tot_act) if tot_act else None,
             "topp_saknade": [c for c, _n in Counter({c: facit_codes[c] for c in missing}).most_common(5)],
         })
     return results
@@ -152,25 +170,30 @@ def _close(a, b, tol=0.01) -> bool:
 
 
 def _print(results: list[dict]) -> None:
-    print(f"\n{'Case':<40}{'facit':>6}{'extr':>6}{'kod%':>6}{'mängd%':>7}{'pris-APE':>9}{'total-avvik':>12}")
+    print(f"\n{'Case':<38}{'kod%':>6}{'mängd%':>7}{'pris-APE':>9}{'total-avv':>10}{'trygg-avv':>10}{'trygg%':>7}")
     print("-" * 92)
-    covers, qtys, totdevs = [], [], []
+    covers, qtys, totdevs, safedevs = [], [], [], []
     for r in results:
         if not r.get("ok"):
-            print(f"{r['case'][:40]:<40}  {r.get('case','')}")
+            print(f"{r['case'][:38]:<38}  {r.get('case','')}")
             continue
         ape = f"{r['pris_median_ape']}%" if r['pris_median_ape'] is not None else "—"
         dev = f"{r['total_avvik_pct']:+d}%" if r['total_avvik_pct'] is not None else "—"
-        print(f"{r['case'][:40]:<40}{r['facit_poster']:>6}{r['extraherade_rader']:>6}"
-              f"{r['kod_tackning_pct']:>5}%{r['mangd_traff_pct']:>6}%{ape:>9}{dev:>12}")
+        sdev = f"{r['total_avvik_sakra_pct']:+d}%" if r['total_avvik_sakra_pct'] is not None else "—"
+        safe = f"{r['sakra_andel_pct']}%" if r['sakra_andel_pct'] is not None else "—"
+        print(f"{r['case'][:38]:<38}{r['kod_tackning_pct']:>5}%{r['mangd_traff_pct']:>6}%{ape:>9}{dev:>10}{sdev:>10}{safe:>7}")
         covers.append(r['kod_tackning_pct'])
         qtys.append(r['mangd_traff_pct'])
         if r['total_avvik_pct'] is not None:
             totdevs.append(abs(r['total_avvik_pct']))
+        if r['total_avvik_sakra_pct'] is not None:
+            safedevs.append(abs(r['total_avvik_sakra_pct']))
     print("-" * 92)
     if covers:
-        print(f"\nMEDIAN kod-täckning: {statistics.median(covers):.0f}%  ·  mängd-träff: {statistics.median(qtys):.0f}%"
-              f"  ·  total-avvik (abs): {statistics.median(totdevs):.0f}%" if totdevs else "")
+        print(f"\nMEDIAN kod-täckning {statistics.median(covers):.0f}% · mängd-träff {statistics.median(qtys):.0f}%"
+              f" · total-avvik {statistics.median(totdevs):.0f}% · TRYGG-avvik {statistics.median(safedevs):.0f}%" if safedevs else "")
+        print("trygg-avv = total-avvikelse på bara de poster motorn visar grönt/gult (mängdjämförbara + samstämmiga)")
+        print("trygg% = andel av facitsumman som faller på trygga poster (resten flaggas röd → människan sätter)")
     print("\nTolkning:")
     print("  kod% = andel av facit-kalkylens poster vi även extraherade ur FFU-MF (extraktionskvalitet)")
     print("  mängd% = av matchade koder: andel där kvantiteten stämmer (±1%)")

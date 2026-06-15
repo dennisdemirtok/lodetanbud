@@ -190,7 +190,7 @@ async def _suggest_prices(args: dict) -> dict:
     for l in unpriced[:200]:
         s = await price_engine.suggest(
             l.get("ama_code"), l.get("description"), l.get("unit"),
-            exclude_case_id=case_id,
+            exclude_case_id=case_id, quantity=l.get("quantity"),
         )
         if s:
             hits += 1

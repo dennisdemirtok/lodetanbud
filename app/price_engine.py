@@ -132,18 +132,31 @@ def _narrow_by_description(obs: list[PriceObservation], description: str,
 
 
 def _build_suggestion(obs: list[PriceObservation], basis: str, base_flags: list[str],
-                      description: str | None) -> dict:
+                      description: str | None, target_qty: float | None = None) -> dict:
     """Slå ihop matchande observationer till ett förslag med spann, n,
-    confidence och utliggar-flagga. Smalnar av på beskrivning när exakt-kod-
-    träffarna spretar brett (utliggarskydd)."""
+    confidence och utliggar-flagga. Avgränsar på mängdskala (klumpsumma vs
+    per-styck) och beskrivning när exakt-kod-träffarna spretar brett."""
     flags = list(base_flags)
-    used = obs
 
-    # Utliggarskydd: spretar exakt-kod-träffarna brett, försök avgränsa på
-    # beskrivning till den verkligt jämförbara delmängden.
-    if len(obs) >= 3 and description and _spread_ratio([o.unit_price for o in obs]) > 4:
-        narrowed = _narrow_by_description(obs, description)
-        if 2 <= len(narrowed) < len(obs):
+    # Filtrera degenererade obs: mängd <= 0 ger à-pris-artefakter (total/≈0 →
+    # astronomiskt à-pris, t.ex. EBC.115 "ton" med mängd ≈ 0 i evalen).
+    used = [o for o in obs if o.quantity is None or o.quantity > 0] or obs
+
+    # Mängd-skala-grind: samma AMA-kod kan vara klumpsumma (mängd≈1, jättepris)
+    # i ett projekt och per-styck (mängd=83) i ett annat — DEK.21 var
+    # "Lekställning à 2 Mkr × 1" vs "Klättergrepp à 10 kr × 83". Behåll bara
+    # obs inom 10× av postens mängd; obs utan mängd behålls (kan ej gallras).
+    if target_qty and target_qty > 0:
+        lo, hi = target_qty / 10.0, target_qty * 10.0
+        scaled = [o for o in used if o.quantity is None or (lo <= o.quantity <= hi)]
+        if 2 <= len(scaled) < len(used):
+            used = scaled
+            flags.append("avgränsat på mängdskala")
+
+    # Utliggarskydd: spretar fortfarande brett → avgränsa på beskrivning.
+    if len(used) >= 3 and description and _spread_ratio([o.unit_price for o in used]) > 4:
+        narrowed = _narrow_by_description(used, description)
+        if 2 <= len(narrowed) < len(used):
             used = narrowed
             basis = f"{basis}+beskrivning"
             flags.append("avgränsat på beskrivning")
@@ -256,8 +269,11 @@ async def suggest(
     description: str | None,
     unit: str | None,
     exclude_case_id: str | None = None,
+    quantity: float | None = None,
 ) -> dict | None:
-    """Prisförslag enligt kaskaden. None när ingen träff — aldrig gissning."""
+    """Prisförslag enligt kaskaden. None när ingen träff — aldrig gissning.
+    quantity (postens mängd) används för mängd-skala-grindning så klumpsumma
+    inte blandas med per-styck-priser."""
     since = (date.today() - timedelta(days=RECENT_MONTHS * 30)).isoformat()
 
     async with SessionLocal() as session:
@@ -265,23 +281,23 @@ async def suggest(
         if ama_code:
             obs = await _fetch_exact(session, ama_code, unit, exclude_case_id, since)
             if obs:
-                return _build_suggestion(obs, "exact", [], description)
+                return _build_suggestion(obs, "exact", [], description, quantity)
 
             # 2. Exakt kod, äldre
             obs = await _fetch_exact(session, ama_code, unit, exclude_case_id, None)
             if obs:
-                return _build_suggestion(obs, "exact_old", ["äldre än 24 mån"], description)
+                return _build_suggestion(obs, "exact_old", ["äldre än 24 mån"], description, quantity)
 
             # 3. Förälderkoder
             for parent in _ancestor_codes(ama_code):
                 obs = await _fetch_exact(session, parent, unit, exclude_case_id, None)
                 if obs:
-                    return _build_suggestion(obs, "parent", [f"närliggande kod {parent}"], description)
+                    return _build_suggestion(obs, "parent", [f"närliggande kod {parent}"], description, quantity)
 
         # 4. Liknande beskrivning (redan avgränsad på beskrivning → ingen ytterligare narrowing)
         obs = await _fetch_similar(session, description or "", unit, exclude_case_id)
         if obs:
-            return _build_suggestion(obs, "similar", ["liknande rad"], None)
+            return _build_suggestion(obs, "similar", ["liknande rad"], None, quantity)
 
     # 5. Ingen träff
     return None

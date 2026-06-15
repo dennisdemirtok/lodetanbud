@@ -760,6 +760,7 @@ async def api_price_suggest_bulk(payload: dict = Body(...)) -> JSONResponse:
             description=line.get("description"),
             unit=(line.get("unit") or "").strip() or None,
             exclude_case_id=exclude_case_id,
+            quantity=line.get("quantity"),
         )
         if s is not None:
             suggestions[str(idx)] = s

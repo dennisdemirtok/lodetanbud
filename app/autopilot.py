@@ -129,7 +129,7 @@ async def _apply_green_prices(case_id: str, case: dict) -> tuple[int, int]:
             continue
         s = await price_engine.suggest(
             line.get("ama_code"), line.get("description"), line.get("unit"),
-            exclude_case_id=case_id,
+            exclude_case_id=case_id, quantity=line.get("quantity"),
         )
         if not s:
             continue

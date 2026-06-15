@@ -154,6 +154,40 @@ async def test_exclude_keeps_standalone_observations(tmp_path, monkeypatch):
     assert s is not None and s["n"] == 1  # NULL-obs överlever exclude
 
 
+@pytest.mark.anyio
+async def test_quantity_scale_gate_separates_lump_sum(tmp_path, monkeypatch):
+    """Samma kod+enhet men klumpsumma (mängd≈1, jättepris) vs per-styck
+    (mängd=80). En per-styck-post ska INTE prissättas från klumpsummorna."""
+    import importlib
+    monkeypatch.setenv("LODET_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    import app.db as dbmod
+    importlib.reload(dbmod)
+    import app.price_engine as pe
+    importlib.reload(pe)
+
+    await dbmod.init_db()
+    async with dbmod.SessionLocal() as s:
+        # Tre klumpsummor (lekplatser): mängd 1, à ~2 Mkr
+        for i, price in enumerate([2_060_000, 123_328, 121_320]):
+            s.add(dbmod.PriceObservation(
+                id=f"lump{i}", case_id=None, ama_code="DEK.21", description="Lekställning special",
+                unit="st", unit_price=price, quantity=1, observed_at="2026-01-01",
+                source="map_netto", won=False, meta={}))
+        # Två per-styck (klättergrepp): mängd ~80, à ~10 kr
+        for i, q in enumerate([83, 82]):
+            s.add(dbmod.PriceObservation(
+                id=f"unit{i}", case_id=None, ama_code="DEK.21", description="Klättergrepp",
+                unit="st", unit_price=10, quantity=q, observed_at="2026-01-01",
+                source="map_netto", won=False, meta={}))
+        await s.commit()
+
+    # Prissätt en per-styck-post (mängd 80) → ska landa på ~10 kr, ej miljonpriserna
+    sg = await pe.suggest("DEK.21", "Klättergrepp", "st", quantity=80)
+    assert sg is not None
+    assert sg["unit_price"] < 1000, f"klumpsummor läckte in: {sg['unit_price']}"
+
+
 def test_cover_page_project_name():
     from app.pdf_extractor import sniff_metadata_from_text
     text = "KARLSTAD.SE\nHaga Entré Park och Torg\nFÖRFRÅGNINGSUNDERLAG\nDiarie nr: 322223\nDATUM: 2025-02-28"
