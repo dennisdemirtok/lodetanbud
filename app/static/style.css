@@ -4309,3 +4309,32 @@ tr.lump-row td { color: var(--muted); font-style: italic; }
   padding: 0 2px; min-width: 320px; max-width: 90%;
 }
 .ov-title-input:focus { outline: none; }
+
+/* ========================================================================
+   Resultat-strip i kalkylatorn: självkostnad → påslag → anbudssumma → TB
+   ======================================================================== */
+.mf-result-strip {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  margin: 0 0 4px;
+  background: var(--bg-sidebar, #F4EFE7);
+  border-radius: 10px;
+}
+.mf-result-item { display: flex; flex-direction: column; gap: 2px; }
+.mf-result-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-2, #8A8378); }
+.mf-result-value { font-family: var(--font-mono); font-size: 1rem; font-weight: 600; color: var(--jarn); }
+.mf-result-op { font-size: 1.1rem; color: var(--muted-2, #8A8378); align-self: flex-end; padding-bottom: 2px; }
+.mf-result-paslag { display: inline-flex; align-items: baseline; font-family: var(--font-mono); font-weight: 600; color: var(--jarn); }
+.mf-result-paslag input {
+  width: 52px; font: inherit; font-size: 1rem; font-weight: 600;
+  border: none; border-bottom: 2px solid var(--ockra); background: transparent;
+  text-align: right; padding: 0 3px 0 0; color: var(--jarn);
+}
+.mf-result-paslag input:focus { outline: none; }
+.mf-result-bid .mf-result-value { color: var(--lodbla); font-size: 1.15rem; }
+.mf-result-tb { margin-left: auto; text-align: right; }
+.mf-result-tb .mf-result-value { color: var(--skog, #3F6212); }
+@media (max-width: 640px) { .mf-result-tb { margin-left: 0; text-align: left; } }

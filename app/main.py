@@ -1204,14 +1204,25 @@ async def api_case_patch(case_id: str, payload: dict = Body(...)) -> JSONRespons
     precis som 'rename matter' i Harvey/Legora."""
     editable = {"project_name", "customer", "document_number"}
     updates = {k: (str(v).strip() or None) for k, v in payload.items() if k in editable}
-    if not updates:
-        raise HTTPException(status_code=400, detail=f"Inga redigerbara fält (tillåtna: {sorted(editable)})")
+    # paslag_procent lagras på meta (per-anbud-override av företagets default)
+    paslag = payload.get("paslag_procent")
+    if not updates and paslag is None:
+        raise HTTPException(status_code=400, detail=f"Inga redigerbara fält (tillåtna: {sorted(editable | {'paslag_procent'})})")
     async with lodet_db.SessionLocal() as session:
         case = await session.get(lodet_db.Case, case_id)
         if case is None:
             raise HTTPException(status_code=404, detail="Case hittades inte")
         for k, v in updates.items():
             setattr(case, k, v)
+        if paslag is not None:
+            meta = dict(case.meta or {})
+            try:
+                meta["paslag_procent"] = max(0.0, float(str(paslag).replace(",", ".")))
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="paslag_procent måste vara ett tal")
+            case.meta = meta
+            flag_modified(case, "meta")
+            updates["paslag_procent"] = meta["paslag_procent"]
         await lodet_db.log_event(session, case_id, "user_edit", {"what": "case_fields", "fields": list(updates)})
         await session.commit()
     return JSONResponse({"ok": True, **updates})

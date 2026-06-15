@@ -505,6 +505,26 @@
                       <button type="button" class="btn btn-primary btn-sm" id="mfSaveBtn">Spara</button>
                     </div>
                   </div>
+                  <div class="mf-result-strip" id="mfResultStrip">
+                    <div class="mf-result-item">
+                      <span class="mf-result-label">Självkostnad</span>
+                      <span class="mf-result-value" id="mfResultCost">—</span>
+                    </div>
+                    <span class="mf-result-op">+</span>
+                    <div class="mf-result-item">
+                      <span class="mf-result-label">Påslag</span>
+                      <span class="mf-result-paslag"><input type="number" id="mfPaslagInput" min="0" step="1" />%</span>
+                    </div>
+                    <span class="mf-result-op">=</span>
+                    <div class="mf-result-item mf-result-bid">
+                      <span class="mf-result-label">Anbudssumma</span>
+                      <span class="mf-result-value" id="mfResultBid">—</span>
+                    </div>
+                    <div class="mf-result-item mf-result-tb">
+                      <span class="mf-result-label">Täckningsbidrag</span>
+                      <span class="mf-result-value" id="mfResultTb">—</span>
+                    </div>
+                  </div>
                   <div class="mf-editor-table-wrap">
                     <table id="mfEditorTable" class="mf-editor-table">
                       <thead>

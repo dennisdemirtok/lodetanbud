@@ -35,6 +35,9 @@ _DEFAULTS: dict = {
     "referensprojekt": "",        # fritext: lista över relevanta referensobjekt
     "nyckelpersoner": "",         # platschef/arbetsledare med erfarenhet
     "ue_policy": "",              # hur företaget arbetar med underentreprenörer
+    # Standardpåslag (%) på självkostnad → anbudssumma. Per anbud kan det
+    # överskridas (case.meta.paslag_procent).
+    "paslag_procent": "15",
     # Inlärt UE-bibliotek (flywheel): område → {company, email}. Struktur, ej sträng.
     "ue_contacts": {},
 }

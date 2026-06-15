@@ -151,6 +151,24 @@ def test_patch_renames_project(client):
     assert ov["project_name"] == "Viltpassage E16"
 
 
+def test_patch_paslag_persists(client):
+    """PATCH paslag_procent sparas på caset (per-anbud-påslag)."""
+    import app.db as dbmod
+
+    async def _seed():
+        async with dbmod.SessionLocal() as s:
+            s.add(dbmod.Case(id="case_ps1", created_at="2026-06-13", state="CALCULATING",
+                             source="zip", source_name="Pkt", project_name="P"))
+            await s.commit()
+
+    client.portal.call(_seed)
+    r = client.patch("/api/cases/case_ps1", json={"paslag_procent": "20"})
+    assert r.status_code == 200, r.text
+    assert r.json()["paslag_procent"] == 20.0
+    c = client.get("/api/cases/case_ps1").json()
+    assert c["paslag_procent"] == 20.0
+
+
 def test_autopilot_runs_and_reports(client):
     """Autopiloten kör säkra steg och returnerar actions/checkpoint/done utan
     att krascha även med tomt case."""

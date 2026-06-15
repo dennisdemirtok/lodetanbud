@@ -34,7 +34,7 @@ const ROUTES = {
   '#/inst/foretag':       { tab: 'inst',        view: 'inst',          crumb: 'Inst / Företag',          handler: renderCompanyForm },
   '#/inst/resurser':      { tab: 'inst',        view: 'inst',          crumb: 'Inst / Resurser',         handler: renderResourcesView },
   '#/inst/index':         { tab: 'inst',        view: 'inst',          crumb: 'Inst / Index',            handler: () => renderInst('Indexserier', 'E84 per litt och KPI för indexjustering av historiska priser.') },
-  '#/inst/paslag':        { tab: 'inst',        view: 'inst',          crumb: 'Inst / Påslag',           handler: () => renderInst('Påslag och marginaler', 'Standardpåslag per kategori + täckningsbidragsregler.') },
+  '#/inst/paslag':        { tab: 'inst',        view: 'inst',          crumb: 'Inst / Påslag',           handler: renderPaslagForm },
   '#/inst/anvandare':     { tab: 'inst',        view: 'inst',          crumb: 'Inst / Användare',        handler: () => renderInst('Användare', 'Roller och behörigheter för flera användare.') },
 };
 
@@ -1132,6 +1132,41 @@ function renderInst(title, desc) {
     content.innerHTML = '<p>Den här inställningen kommer snart.</p>'
       + '<p class="muted">Fyll i Företagsinfo och Resursbibliotek så länge — det är det som driver kalkylen och AFB-svaren.</p>';
   }
+}
+
+async function renderPaslagForm() {
+  document.getElementById('instEyebrow').textContent = 'Inställningar';
+  document.getElementById('instTitle').textContent = 'Påslag och marginaler';
+  document.getElementById('instDesc').textContent =
+    'Standardpåslag på självkostnad → anbudssumma. Kan justeras per anbud i kalkylatorn.';
+  const content = document.getElementById('instContent');
+  content.className = 'panel';
+  let current = '15';
+  try { current = (await (await fetch('/api/company')).json()).paslag_procent ?? '15'; } catch {}
+  content.innerHTML = `
+    <form id="paslagForm" class="form" style="max-width:420px">
+      <label>Standardpåslag (%)
+        <input type="number" name="paslag_procent" min="0" step="1" value="${escapeAttr(String(current))}" />
+      </label>
+      <p class="muted small">Exempel: 1 000 000 kr självkostnad + 15 % = 1 150 000 kr anbudssumma (täckningsbidrag 150 000 kr).</p>
+      <button type="submit" class="btn btn-primary">Spara</button>
+      <span class="form-status muted small" id="paslagStatus"></span>
+    </form>`;
+  document.getElementById('paslagForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const val = e.target.paslag_procent.value;
+    const status = document.getElementById('paslagStatus');
+    try {
+      await fetch('/api/company', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paslag_procent: val }),
+      });
+      status.textContent = 'Sparat ✓';
+      setTimeout(() => { status.textContent = ''; }, 1500);
+    } catch {
+      status.textContent = 'Kunde inte spara';
+    }
+  });
 }
 
 async function renderCompanyForm() {
@@ -2556,6 +2591,64 @@ function updateMfTotals() {
     const t = sectionTotals[sec];
     el.textContent = t ? `${fmtSEK.format(round2(t))} kr` : '';
   });
+
+  renderMfResult(grandTotal);
+}
+
+// Självkostnad → påslag → anbudssumma → täckningsbidrag
+function renderMfResult(selfCost) {
+  const costEl = document.getElementById('mfResultCost');
+  const bidEl = document.getElementById('mfResultBid');
+  const tbEl = document.getElementById('mfResultTb');
+  if (!costEl || !bidEl || !tbEl) return;
+  const paslag = _currentPaslag();
+  const bid = selfCost * (1 + paslag / 100);
+  const tb = bid - selfCost;
+  const marg = bid > 0 ? Math.round(100 * tb / bid) : 0;
+  costEl.textContent = `${fmtSEK.format(round2(selfCost))} kr`;
+  bidEl.textContent = `${fmtSEK.format(round2(bid))} kr`;
+  tbEl.textContent = selfCost > 0 ? `${fmtSEK.format(round2(tb))} kr · ${marg}%` : '—';
+}
+
+function _currentPaslag() {
+  const inp = document.getElementById('mfPaslagInput');
+  const v = inp ? parseFloat(inp.value) : NaN;
+  return Number.isFinite(v) && v >= 0 ? v : 15;
+}
+
+// Initiera påslags-fältet: case-värde → företagsdefault → 15. Spara vid ändring.
+async function setupPaslag(caseId, casePaslag) {
+  const inp = document.getElementById('mfPaslagInput');
+  if (!inp) return;
+  let value = casePaslag;
+  if (value == null) {
+    try {
+      const comp = await (await fetch('/api/company')).json();
+      value = comp.paslag_procent;
+    } catch {}
+  }
+  inp.value = value != null && value !== '' ? value : 15;
+  renderMfResult((mfEditorState.parsedMf?.lines || []).reduce((s, l) => s + (l.total_amount || 0), 0));
+
+  if (!inp._bound) {
+    inp._bound = true;
+    let t;
+    const persist = () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const cid = getCurrentCaseId();
+        if (!cid) return;
+        fetch(`/api/cases/${encodeURIComponent(cid)}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paslag_procent: _currentPaslag() }),
+        }).catch(() => {});
+      }, 800);
+    };
+    inp.addEventListener('input', () => {
+      renderMfResult((mfEditorState.parsedMf?.lines || []).reduce((s, l) => s + (l.total_amount || 0), 0));
+      persist();
+    });
+  }
 }
 
 function updateMfDirtyState() {
@@ -2769,6 +2862,7 @@ async function renderKalkylatorForCase(caseId) {
 
     const _backBtn = document.getElementById('kalkylatorBackBtn');
     if (_backBtn) _backBtn.onclick = () => { location.hash = `#/oversikt/${encodeURIComponent(caseId)}`; };
+    setupPaslag(caseId, c.paslag_procent);
     document.getElementById('kalkylatorProjectName').textContent = c.project_name || c.source_name || c.id;
     const metaParts = [];
     if (c.document_number) metaParts.push(escapeHtml(c.document_number));
